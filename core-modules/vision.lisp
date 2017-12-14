@@ -13,9 +13,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : vision.lisp
-;;; Version     : 5.0
+;;; Version     : 6.0
 ;;; 
-;;; Description : Source code for the ACT-R 6 Vision Module.  
+;;; Description : Source code for the ACT-R Vision Module.  
 ;;;
 ;;; Bugs        : [X] Should object-present-p do a chunk match to determine if
 ;;;                   the object is still the "same"?  I'm doing that now, but
@@ -740,6 +740,37 @@
 ;;;             : * The start-tracking request completes eventhough it leaves
 ;;;             :   the module busy because that seems like the right way to
 ;;;             :   handle that.
+;;; 2016.07.08 Dan [5.1]
+;;;             : * If the module is tracking something and the tracked object
+;;;             :   chunk in the visual buffer has a screen-pos slot that matches
+;;;             :   the chunk in the visual-location buffer then it should 
+;;;             :   update that visual-location chunk even if there's a feature
+;;;             :   mismatch otherwise -- could happen because of some custom
+;;;             :   device code using modified chunks.
+;;;             : * Added the parameter :tracking-clear which if set to t clears
+;;;             :   the attended-loc when tracking fails and if it's set to nil
+;;;             :   the loc remains which means it will attend the nearest thing
+;;;             :   to where it left off (assuming it's within the move tolerance).
+;;;             :   The default is t to be backward compatible.
+;;; 2016.07.15 Dan
+;;;             : * The unstuff-buffer event didn't specify the module as vision
+;;;             :   but does now.
+;;; 2016.07.20 Dan [6.0]
+;;;             : * CLOF is back!  It turns out that with delete-visicon-chunks
+;;;             :   enabled it's possible to end up in a situation where the 
+;;;             :   current-marker chunk gets deleted before it gets a replacement.
+;;;             :   There are a couple of ways to address that, but it seems the
+;;;             :   easiest is to bring back a separate slot to hold the position
+;;;             :   information outside of a chunk so it'll still be available
+;;;             :   even if the chunk is deleted.
+;;;             : * Encoding-complete and get-obj-at-location now take the position
+;;;             :   vector (clof) as a parameter in addition to the location chunk
+;;;             :   since the chunk could be deleted by the time the event occurs.
+;;;             : * Clear clof in the reset function and the clear action.
+;;; 2016.07.21 Dan
+;;;             : * Updated featlis-to-focus to check whether it has a real chunk
+;;;             :   for the location or not and use the clof value (converted to
+;;;             :   a chunk) if needed.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General description of update
@@ -830,10 +861,12 @@
    (center-point :accessor center-point :initform (vector 0 0))
    (process-display-called :accessor process-display-called :initform nil)
    (vis-loc-slots :accessor vis-loc-slots :initform '(screen-x screen-y distance))
-   (last-visual-request :accessor last-visual-request :initform nil))
+   (last-visual-request :accessor last-visual-request :initform nil)
+   (tracking-clear :accessor tracking-clear :initform nil)
+   (clof :accessor clof :initform nil))
   (:default-initargs
     :name :VISION
-    :version-string "5.0"))
+    :version-string "6.0"))
 
 
 (defmethod vis-loc-to-obj (device vis-loc)
@@ -898,6 +931,20 @@
 (defmethod record-vis-loc-slots ((vis-m vision-module) slot-list)
   (setf (vis-loc-slots vis-m) slot-list))
 
+(defmethod set-current-marker ((vis-mod vision-module) marker &optional lof)
+  (cond ((null marker)
+         (setf (current-marker vis-mod) nil)
+         (setf (clof vis-mod) nil))
+        ((chunk-p-fct marker)
+         (setf (clof vis-mod) (xyz-loc marker vis-mod))
+         (setf (current-marker vis-mod) marker))
+        (lof
+         (setf (current-marker vis-mod) marker)
+         (setf (clof vis-mod) lof))
+        (t
+         (print-warning "Invalid current-marker encountered in vision module: ~s" marker)
+         (setf (current-marker vis-mod) nil)
+         (setf (clof vis-mod) nil))))
 
 (defmethod process-display ((devin device-interface) (vis-mod vision-module) &optional (clear nil))
   "Build a new visicon and initiate any buffer stuffing that may result"
@@ -932,7 +979,7 @@
     
     (when (and (last-processed-device devin) (not (eq (last-processed-device devin) (device devin))))
       (setf (currently-attended vis-mod) nil)
-      (setf (current-marker vis-mod) nil))
+      (set-current-marker vis-mod nil))
     
     ;; record the last device processed
     (setf (last-processed-device devin) (device devin))
@@ -1149,7 +1196,7 @@
                  (not (gethash (currently-attended vis-mod) (visicon vis-mod))))
             (and (current-marker vis-mod)
                  (null (currently-attended vis-mod))
-                 (within-move vis-mod (xyz-loc (current-marker vis-mod) vis-mod))))
+                 (within-move vis-mod (clof vis-mod))))
     
     ;; Change it now to avoid problems with simultaneous non-scheduled updates
     
@@ -1166,7 +1213,7 @@
      :time-in-ms t
      :destination :vision
      :module :vision
-     :params `(,(current-marker vis-mod) ,(last-scale vis-mod) :requested nil)
+     :params `(,(current-marker vis-mod) ,(clof vis-mod) ,(last-scale vis-mod) :requested nil)
      :details (concatenate 'string "Encoding-complete " (symbol-name (current-marker vis-mod)) " "  (symbol-name (last-scale vis-mod)))
      :output 'medium)))
 
@@ -1202,7 +1249,7 @@
                             (delete-event it))
                      (setf (unstuff-event vis-mod)
                        (schedule-event-relative delay 'unstuff-buffer :maintenance t :params (list 'visual-location chunk) 
-                                                :destination :vision :output nil :time-in-ms t
+                                                :destination :vision :module :vision :output nil :time-in-ms t
                                                 :precondition 'check-unstuff-buffer))))))))))
   
 
@@ -1264,26 +1311,25 @@
   (let* ((attended (first (chunk-spec-slot-spec spec :attended)))
          (slots (remove-if 'keywordp (chunk-spec-slot-spec spec) :key 'spec-slot-name))
          (current (current-marker vis-mod))
-         (current-slots (when current (chunk-filled-slots-list-fct current)))
+         (current-valid (chunk-p-fct current))
+         (clof (clof vis-mod))
+         (current-slots (when (and current current-valid) (chunk-filled-slots-list-fct current)))
          (nearest (spec-slot-value (first (chunk-spec-slot-spec spec :nearest))))
          (min-max-tests nil))
       
     ;; Remap all current values to the current chunk
     
-    (if current
-        (dolist (x slots)
-          (when (eq (spec-slot-value x) 'current)
-            (if (find (spec-slot-name x) current-slots)
-                (if (and (eq (spec-slot-name x) 'value) (chunk-real-visual-value current)) 
-                   (setf (spec-slot-value x) (chunk-real-visual-value current)) 
-                  (setf (spec-slot-value x) (chunk-slot-value-fct current (spec-slot-name x))))
-              (progn
+    (dolist (x slots)
+      (when (eq (spec-slot-value x) 'current)
+        (if (find (spec-slot-name x) current-slots)
+            (if (and (eq (spec-slot-name x) 'value) (chunk-real-visual-value current)) 
+                (setf (spec-slot-value x) (chunk-real-visual-value current)) 
+              (setf (spec-slot-value x) (chunk-slot-value-fct current (spec-slot-name x))))
+          (progn
+            (if current-valid
                 (print-warning "Current visual-location does not have a slot named ~S so it is ignored in the request." (spec-slot-name x))
-                (setf slots (remove x slots))))))
-      (dolist (x slots)
-        (when (eq (spec-slot-value x) 'current)
-          (print-warning "There is no currently attended location.  So, request specifying ~S as current is being ignored." (spec-slot-name x))
-          (setf slots (remove x slots)))))
+              (print-warning "There is no currently attended location.  So, request specifying ~S as current is being ignored." (spec-slot-name x)))
+            (setf slots (remove x slots))))))
     
     ;; Remove all tests for highest and lowest for later
     
@@ -1347,11 +1393,11 @@
         
         (when (and nearest matching-chunks)
           (cond ((find nearest '(current-x current-y current-distance))
-                 (let ((current-val (aif current 
-                                         (chunk-slot-value-fct it (case nearest 
-                                                                    (current-x (first coord-slots)) 
-                                                                    (current-y (second coord-slots)) 
-                                                                    (current-distance (third coord-slots))))
+                 (let ((current-val (aif clof 
+                                         (case nearest 
+                                           (current-x (px clof)) 
+                                           (current-y (py clof)) 
+                                           (current-distance (pz clof)))
                                          (progn 
                                            (model-warning "No location has yet been attended so current is assumed to be at 0,0,~d." (view-dist vis-mod))
                                            (case nearest (current-x 0) (current-y 0) (current-distance (view-dist vis-mod)))))))
@@ -1377,8 +1423,8 @@
                                        (xy-loc (chunk-slot-value-fct center-spec 'screen-pos) vis-mod))
                                       (t
                                        (center-point vis-mod))))
-                        (current-point (aif (current-marker vis-mod) 
-                                            (xy-loc it vis-mod)
+                        (current-point (aif (clof vis-mod) 
+                                            it
                                             (progn 
                                               (model-warning "No location has yet been attended so current is assumed to be at 0,0.")
                                               (vector 0 0)))))
@@ -1391,8 +1437,8 @@
                                                          (lambda (x) 
                                                            (angle-between current-point (xy-loc x vis-mod) center)))))))     
                 ((eq nearest 'current)
-                 (let ((nearest-coords (aif (current-marker vis-mod) 
-                                            (xyz-loc it vis-mod)
+                 (let ((nearest-coords (aif (clof vis-mod) 
+                                            it
                                             (progn 
                                               (model-warning "No location has yet been attended so current is assumed to be at 0,0,~d." (view-dist vis-mod))
                                               (vector 0 0 (view-dist vis-mod))))))
@@ -1621,17 +1667,17 @@
 ;;;             :     chunk.
 ;;;             : [5] If requested, print it.
 
-(defgeneric encoding-complete (vis-mod loc-dmo scale &key requested)
+(defgeneric encoding-complete (vis-mod loc-dmo position scale &key requested)
   (:documentation "When MOVE-ATTENTION completes, focus on a place with this."))
 
-(defmethod encoding-complete ((vis-mod vision-module) loc scale &key (requested t))
+(defmethod encoding-complete ((vis-mod vision-module) loc position scale &key (requested t))
   
   (setf (moving-attention vis-mod) nil)
   (change-state vis-mod :exec 'free :proc 'free)
-  (setf (current-marker vis-mod) loc)
+  (set-current-marker vis-mod loc position)
   (complete-request (last-visual-request vis-mod))
 
-  (let ((return-obj (get-obj-at-location vis-mod loc scale)))
+  (let ((return-obj (get-obj-at-location vis-mod loc position scale)))
     
     (if return-obj
         (progn
@@ -1695,22 +1741,20 @@
        (add-finst vis-mod obj)))
 
 
-(defgeneric get-obj-at-location (vis-mod loc scale)
+(defgeneric get-obj-at-location (vis-mod loc xyz-loc scale)
   (:documentation  "Given a location and a scale, return a chunk representing what's there."))
 
-(defmethod get-obj-at-location ((vis-mod vision-module) loc scale)
-  (let ((xyz-loc (xyz-loc loc vis-mod)))
-    
-    (cond ((eq scale 'PHRASE)
-           (get-phrase-at vis-mod loc))
-          ((and (eq scale 'WORD) (not (optimize-p vis-mod)))
-           (get-word-at-noopt vis-mod loc))
-          (t
-           (let ((feat-lis (within-move vis-mod xyz-loc)))
-             (when (eq scale 'WORD)
-               (setf feat-lis (text-feats feat-lis)))
-             (when feat-lis
-               (featlis-to-focus vis-mod loc feat-lis)))))))
+(defmethod get-obj-at-location ((vis-mod vision-module) loc xyz-loc scale)
+  (cond ((eq scale 'PHRASE)
+         (get-phrase-at vis-mod loc))
+        ((and (eq scale 'WORD) (not (optimize-p vis-mod)))
+         (get-word-at-noopt vis-mod loc))
+        (t
+         (let ((feat-lis (within-move vis-mod xyz-loc)))
+           (when (eq scale 'WORD)
+             (setf feat-lis (text-feats feat-lis)))
+           (when feat-lis
+             (featlis-to-focus vis-mod loc xyz-loc feat-lis))))))
 
 (defun text-feats (feat-lst)
   "Given a list, return only those features which are TEXT features."
@@ -1719,25 +1763,32 @@
 
 ;;; FEATLIS-TO-FOCUS      [Method]
 
-(defgeneric featlis-to-focus (vis-mod loc feat-lis)
+(defgeneric featlis-to-focus (vis-mod loc xyz-loc feat-lis)
   (:documentation  "Given the source location and a list of features, return the DMO that should be the focus."))
 
-(defmethod featlis-to-focus ((vis-mod vision-module) loc feat-lis)
+
+(defmethod featlis-to-focus ((vis-mod vision-module) loc xyz-loc feat-lis)
   (let* ((best-feature 
           (find-best-feature vis-mod feat-lis 
-                             (aif (gethash (chunk-visicon-entry loc) (visicon vis-mod))
-                                  (if (chunk-p-fct it)
-                                      it
-                                    loc)
-                                  loc)))
+                             (if (chunk-p-fct loc)
+                                 (aif (gethash (chunk-visicon-entry loc) (visicon vis-mod))
+                                      (if (chunk-p-fct it)
+                                          it
+                                        loc)
+                                      loc)
+                               (let ((slots (vis-loc-slots vis-mod)))
+                                 (car (define-chunks-fct (list (mapcan (lambda (x y) (list x y)) slots (coerce xyz-loc 'list)))))))))
          (dmo-lis (featlis-to-chunks vis-mod (feat-match-xyz feat-lis (xyz-loc best-feature vis-mod) vis-mod)))
          (return-chunk (determine-focus-dmo vis-mod dmo-lis best-feature)))
     
     ;; don't mark everything just the one that's being returned   (dolist (obj dmo-lis)
-    
+      
     (when return-chunk
-      (set-chunk-slot-value-fct return-chunk 'screen-pos loc) ;;;  Should it use the cannonical loc instead? (gethash best-feature (visicon vis-mod)) 
-      )
+      (set-chunk-slot-value-fct return-chunk 'screen-pos
+                                (if (chunk-p-fct loc)
+                                    loc ;; use the loc provided regardless
+                                  ;;;  Otherwise use the cannonical loc for that item
+                                  (chunk-visicon-entry best-feature))))
     
     return-chunk))
 
@@ -2116,12 +2167,6 @@
 ;;; Description : Updating is kind of a pain.  First, if the tracked object
 ;;;             : hasn't moved, then do nothing.  If it has moved, however,
 ;;;             : there's a lot of bookkeeping to be done:
-;;;             : [1] The old location need to have its object stripped and
-;;;             : removed as an activation source.
-;;;             : [2] The new location needs to be created, added to the 
-;;;             : attention focus, and have its OBJECTS slot set.
-;;;             : [3] The object chunk needs to have its location changed.
-
 
 #|
 
@@ -2228,7 +2273,8 @@ Whenever there's a change to the display the buffers will be updated as follows:
                           (schedule-clear-buffer 'visual 0 :time-in-ms t :module :vision :output 'high :priority 13)
                           (change-state vis-mod :exec 'free :proc 'free)
                           (clear-attended vis-mod)
-                          (setf (current-marker vis-mod) nil)
+                          (when (tracking-clear vis-mod)
+                            (set-current-marker vis-mod nil))
                           (set-buffer-failure 'visual :ignore-if-full t)
                           (setf (attend-failure vis-mod) t)
                           (setf (tracked-obj vis-mod) nil)
@@ -2272,11 +2318,20 @@ Whenever there's a change to the display the buffers will be updated as follows:
              (vis-loc-chunk (buffer-read 'visual-location))
              (vis-obj-chunk (buffer-read 'visual)))
         
+        
+        ;; we don't have an old-loc but the one currently in the
+        ;; visual-location buffer is the screen-pos of the old-obj
+        ;; should make that the old-loc.  This is the 5.1 fix.
+        
+        (when (and (null old-loc) old-obj vis-loc-chunk
+                   (chunk-slot-equal vis-loc-chunk (fast-chunk-slot-value-fct old-obj 'screen-pos)))
+          (setf old-loc vis-loc-chunk))
+        
         (unless new-loc
           (tracking-failed))
         
         (setf (tracked-obj-last-feat vis-mod) new-feat)
-        (setf (current-marker vis-mod) new-loc)
+        (set-current-marker vis-mod new-loc)
         
         (let ((new-obj (convert-loc-to-object new-loc)))
           
@@ -2441,7 +2496,8 @@ Whenever there's a change to the display the buffers will be updated as follows:
   (setf (last-obj vis-mod) nil)
   (setf (loc-failure vis-mod) nil)
   (setf (attend-failure vis-mod) nil)
-  (setf (scene-change vis-mod) nil))
+  (setf (scene-change vis-mod) nil)
+  (setf (clof vis-mod) nil))
 
 
 ;;; FIND-LOCATION      [Method]
@@ -2551,11 +2607,12 @@ Whenever there's a change to the display the buffers will be updated as follows:
          
          (setf (attend-failure vis-mod) nil)
          
+         (set-current-marker vis-mod location)
+         
          (schedule-event-relative (randomize-time-ms (move-attn-latency vis-mod)) 'encoding-complete
-                                  :time-in-ms t :destination :vision :module :vision :params (list location scale) :output 'medium
+                                  :time-in-ms t :destination :vision :module :vision :params (list location (clof vis-mod) scale) :output 'medium
                                   :details (concatenate 'string "Encoding-complete " (symbol-name location) " " (symbol-name scale)))
          
-         (setf (current-marker vis-mod) location)
          (change-state vis-mod :exec 'BUSY :proc 'BUSY))))
   
 
@@ -2569,6 +2626,7 @@ Whenever there's a change to the display the buffers will be updated as follows:
   
   (reset-pm-module vis-mod)
   
+  (setf (clof vis-mod) nil)
   (clrhash (visicon vis-mod))
   (clrhash (found-locs vis-mod))
   
@@ -2857,8 +2915,9 @@ Whenever there's a change to the display the buffers will be updated as follows:
            (cdr param)))
        (cdr param))
       (:overstuff-visual-location
-       (setf (overstuff-loc vis-mod) (cdr param))))
-    
+       (setf (overstuff-loc vis-mod) (cdr param)))
+      (:tracking-clear
+       (setf (tracking-clear vis-mod) (cdr param))))
     (case param
       
       (:optimize-visual
@@ -2885,8 +2944,8 @@ Whenever there's a change to the display the buffers will be updated as follows:
        (if (numberp (unstuff-loc vis-mod))
            (ms->seconds (unstuff-loc vis-mod))
          (unstuff-loc vis-mod)))
-      (:overstuff-visual-location
-       (overstuff-loc vis-mod)))))
+      (:overstuff-visual-location (overstuff-loc vis-mod))
+      (:tracking-clear (tracking-clear vis-mod)))))
 
 
 (define-module-fct :vision 
@@ -2968,10 +3027,15 @@ Whenever there's a change to the display the buffers will be updated as follows:
      :default-value nil
      :warning "T or NIL"
      :documentation "Whether a chunk previously stuffed into the visual-location buffer can be overwritten by a new chunk to be stuffed")
+   (define-parameter :tracking-clear
+     :valid-test 'tornil
+     :default-value t
+     :warning "T or NIL"
+     :documentation "Whether a tracking failure clears the currently attended location")
    (define-parameter :viewing-distance :owner nil)
    (define-parameter :pixels-per-inch :owner nil))
   
-  :version "5.0"
+  :version "6.0"
   :documentation "A module to provide a model with a visual attention system"
   :creation 'create-vision-module
   :reset 'reset-vision-module
@@ -3404,7 +3468,7 @@ Whenever there's a change to the display the buffers will be updated as follows:
 (defun attend-visual-coordinates (x y &optional distance)
   "Tells the Vision Module to start with attention at a certain location."
   (aif (get-module :vision)
-       (setf (current-marker it) 
+       (set-current-marker it 
          (car (define-chunks-fct `((isa visual-location
                                         ,(first (vis-loc-slots it)) ,x
                                         ,(second (vis-loc-slots it)) ,y

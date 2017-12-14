@@ -21,9 +21,14 @@
 ;;;             : code to open and manage an environment socket connection. 
 ;;; Bugs        : 
 ;;; 
-;;; Todo        : Reconstruct why all the error trapping ignores the
-;;;             : unbound-variable errors because that's a bad thing
-;;;             : for the stand-alone version...
+;;; Todo        : [ ] Currently stopping the environment doesn't cause the
+;;;             :     Tk side to cleanly destroy all windows and remove the
+;;;             :     handlers.  That could be an issue for something that
+;;;             :     needs to do some cleanup (like the history tools table).
+;;;             :     For now, special casing that table in the closing,
+;;;             :     but should look into having the close message be more
+;;;             :     thorough (some quick fix attempts ran into ugly issues
+;;;             :     with timing/waiting issues).
 ;;; 
 ;;; ----- History -----
 ;;;
@@ -243,6 +248,24 @@
 ;;;             :   because v7 is available and assuming it works the same as
 ;;;             :   the previous 2 so just removing the version check since
 ;;;             :   I doubt that anyone is using v4 at this point.
+;;; 2016.01.14 Dan
+;;;             : * Added a run-environment for ACL+Linux.
+;;; 2016.04.14 Dan
+;;;             : * Added a dummy-env-handler function which does nothing so
+;;;             :   that I don't have to put the empty lambda in all the 
+;;;             :   environment tools...
+;;; 2016.06.02 Dan
+;;;             : * Added the Todo about fixing the close problem.
+;;;             : * Removed the old Todo because it seems like it's a non-
+;;;             :   issue now.
+;;;             : * The connection closing now clears the table of history
+;;;             :   data in *history-recorder-data-cache* when all connections
+;;;             :   are gone (fixing the close issue would eliminate the need
+;;;             :   for this).
+;;; 2016.06.09 Dan
+;;;             : * To avoid an undefined variable warning using a function
+;;;             :   to clear the history data cache which can be declaimed
+;;;             :   and defined in the history code.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -254,6 +277,8 @@
 (declaim (ftype (function (t t) t) delete-handler))
 (declaim (ftype (function (t) t) send-register))
 (declaim (ftype (function (t t) t) update-handler))
+(declaim (ftype (function () t) clear-history-cache))
+
 
 ;;; The environment-control structure is created once and maintains all of the
 ;;; top-level information about the state of all connected environments.
@@ -378,6 +403,9 @@
     
   (setf (environment-control-connections *environment-control*)
     (remove connection (environment-control-connections *environment-control*)))
+  
+  (when (zerop (length (environment-control-connections *environment-control*)))
+    (clear-history-cache))
   
   (maphash #'(lambda (key value) 
                (declare (ignore key))
@@ -666,6 +694,9 @@
            (> (/ (- (get-internal-real-time) start-time) internal-time-units-per-second) max-delay))))))
 
 
+(defun dummy-env-handler (x)
+  (declare (ignore x)))
+
 ;;; Adding a hack for a problem with how run-program creates the string that it
 ;;; sends to Windows to execute because it doesn't properly escape spaces as of
 ;;; CCL 1.9.
@@ -736,6 +767,15 @@
   (sleep delay)
   (while (null (start-environment)) (sleep delay)))
 
+
+#+(and :allegro :linux)
+(defun run-environment (&optional (delay 5))
+  (let ((c (current-directory)))
+    (chdir "ACT-R:environment;GUI")
+    (run-shell-command "./starter.tcl" :wait nil)
+    (chdir c))
+  (sleep delay)
+  (while (null (start-environment)) (sleep delay)))
 
 (unless (fboundp 'run-environment)
   (defun run-environment (&optional (delay 0))

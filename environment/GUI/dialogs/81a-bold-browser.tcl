@@ -1,23 +1,15 @@
 
-proc make_bold_multi_graphs {} {
+proc make_bold_multi_graphs {key current} {
   
-  if {[currently_selected_model] == "nil"} {
-    tk_messageBox -icon info -type ok -title "BOLD Graphs" -message "BOLD tools require a current model."
-  } else {
-
   set win [toplevel [new_variable_name .bold_graphs]]
 
   global $win.scale
 
-  upvar $win.scale scale
-
-  set scale 1.0
+  set $win.scale 1.0
   
   # hide the window for speed and aesthetic reasons
   
   wm withdraw $win
-
-  record_new_window $win $win
 
   wm geometry $win [get_configuration .bold_graphs $win]
   
@@ -29,8 +21,11 @@ proc make_bold_multi_graphs {} {
                         -selectmode multiple \
                         -exportselection 0 -font list_font -bd 0]
 
-  send_environment_cmd "create list-box-handler $list_box $list_box \
-                        (lambda (x) (declare (ignore x)) (no-output (buffers))) () [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-box-handler $list_box $list_box (lambda (x) (declare (ignore x)) (bold-tool-buffer-list '$key)) () $key"
+  } else {
+    send_environment_cmd "create list-box-handler $list_box $list_box (lambda (x) (declare (ignore x)) (bold-tool-buffer-list '$key)) ()"
+  }
   
   # Make sure that when this window is closed that the Lisp side
   # handler gets removed as well
@@ -41,8 +36,7 @@ proc make_bold_multi_graphs {} {
 
   # create the scroll bar for the listbox
   
-  set list_scroll_bar [scrollbar $list_frame.list_scrl \
-                                 -command "$list_box yview"]
+  set list_scroll_bar [scrollbar $list_frame.list_scrl -command "$list_box yview"]
 
   # here's the frame for the chunk display
 
@@ -54,39 +48,29 @@ proc make_bold_multi_graphs {} {
          -yscrollcommand "$win.frame.scrly set" \
          -bg white
           
-    scrollbar $win.frame.scrlx \
-              -command "$win.frame.canvas xview" -orient horizontal
+  scrollbar $win.frame.scrlx -command "$win.frame.canvas xview" -orient horizontal
 
-    scrollbar $win.frame.scrly \
-              -command "$win.frame.canvas yview" -orient vertical
+  scrollbar $win.frame.scrly -command "$win.frame.canvas yview" -orient vertical
 
- ## Create a dummy handler to set the :save-buffer-trace parameter to t
- ## whenever a bold-browser window is open.
-
-    send_environment_cmd \
-      "create simple-handler $frame $win.dummy \
-         (lambda (x) (declare (ignore x)) (no-output (sgp :save-buffer-trace t)) nil) (reset) [send_model_name]"
-
-
-    bind $frame <Destroy> "remove_handler $win.frame"
-
-
-  send_environment_cmd "create list-handler $win.frame.canvas $win.return \
-                        (lambda (x)(declare (ignore x))) () [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-handler $win.frame.canvas $win.return dummy-env-handler () $key"
+  } else {
+    send_environment_cmd "create list-handler $win.frame.canvas $win.return dummy-env-handler ()"
+  }
 
   # make sure that when the window is closed the Lisp handler gets removed
 
   bind $win.frame.canvas <Destroy> "kill_bold_multi_window $win"
   
-  bind $list_box <<ListboxSelect>> "select_multi_buffer_graph %W $win.frame.canvas $win"
+  bind $list_box <<ListboxSelect>> [list select_multi_buffer_graph %W $key $win.frame.canvas $win]
 
-  checkbutton $win.check -text "Scale across regions" -variable $win.checkbox -onvalue nil -offvalue t -font checkbox_font -command "select_multi_buffer_graph $list_box $win.frame.canvas $win"
+  checkbutton $win.check -text "Scale across regions" -variable $win.checkbox -onvalue nil -offvalue t -font checkbox_font -command [list select_multi_buffer_graph $list_box $key $win.frame.canvas $win]
 
   button $win.zoom_in -command "bold_multi_zoom_in $win" -text "+" -font button_font
 
   button $win.zoom_out -command  "bold_multi_zoom_out $win" -text "-" -font button_font
 
-  button $win.redisplay -command  "select_multi_buffer_graph $list_box $win.frame.canvas $win" -text "Redisplay" -font button_font
+  button $win.redisplay -command  [list select_multi_buffer_graph $list_box $key $win.frame.canvas $win] -text "Redisplay" -font button_font
 
   label $win.start -font text_font -text "Start"
   label $win.stop -font text_font -text "Stop"
@@ -98,7 +82,6 @@ proc make_bold_multi_graphs {} {
   pack $win.frame.scrlx -side bottom -fill x
   pack $win.frame.scrly -side right -fill y
   place $win.frame.canvas -relx 0 -rely 0 -relwidth 1.0 -relheight 1.0
-
 
   place $win.check -x 0 -y 0 -height 25 -relwidth .18
 
@@ -120,7 +103,8 @@ proc make_bold_multi_graphs {} {
 
   wm deiconify $win
   focus $win
-  }
+
+  return $win
 }
 
 proc bold_multi_zoom_out {win} {
@@ -171,7 +155,7 @@ proc kill_bold_multi_window {win} {
 }
 
 
-proc select_multi_buffer_graph {listwin target_win win} {
+proc select_multi_buffer_graph {listwin key target_win win} {
 
   if [valid_handler_name $target_win] {
     set selections [$listwin curselection]
@@ -196,7 +180,7 @@ proc select_multi_buffer_graph {listwin target_win win} {
 
       send_environment_cmd "update [get_handler_name $target_win] \
              (lambda (x) (declare (ignore x))\
-                 (parse-bold-predictions-for-graph (cons '[get_handler_name $target_win] '$target_win) nil $local $st $et))"
+                 (parse-bold-predictions-for-graph (cons '[get_handler_name $target_win] '$target_win) '$key nil $local $st $et))"
 
       $target_win configure -state disabled
 
@@ -250,7 +234,7 @@ proc select_multi_buffer_graph {listwin target_win win} {
       
         send_environment_cmd "update [get_handler_name $target_win] \
              (lambda (x) (declare (ignore x))\
-                 (parse-bold-predictions-for-graph (cons '[get_handler_name $target_win] '$target_win) '$chunk $local $st $et))"
+                 (parse-bold-predictions-for-graph (cons '[get_handler_name $target_win] '$target_win) '$key '$chunk $local $st $et))"
        
         wait_for_non_null $win.return
 
@@ -278,6 +262,7 @@ proc select_multi_buffer_graph {listwin target_win win} {
       }
 
       global $win.scale
+      
       upvar $win.scale scale
       
       if {$scale != 1.0} {resize_window $win $scale}
@@ -287,15 +272,10 @@ proc select_multi_buffer_graph {listwin target_win win} {
       $target_win delete all
 
       send_environment_cmd \
-          "update [get_handler_name $target_win] (lambda (x) (Declare (ignore x)))" 
+          "update [get_handler_name $target_win] dummy-env-handler" 
     }
   }
 }
 
 
-button [control_panel_name].bold_multi_graphs -command {make_bold_multi_graphs} \
-       -text "Buffer graphs" -font button_font
-
-# put that button on the control panel
-
-pack [control_panel_name].bold_multi_graphs
+add_history_button make_bold_multi_graphs "BOLD Graphs" :save-bold-data "BOLD data" right get-bold-module-data save-bold-data-info

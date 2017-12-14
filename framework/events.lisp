@@ -49,6 +49,10 @@
 ;;;             :   entirely, and add the dynamic reporting to break events.
 ;;; 2014.09.04 Dan
 ;;;             : * Finally removed that trailing space from the event output!
+;;; 2016.04.14 Dan
+;;;             : * Since :output nil events are actually being output in some
+;;;             :   cases now format-event doesn't show the params for such an
+;;;             :   event since they're probably non-readable.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -152,7 +156,7 @@
         (evt-details event)
         (evt-details event)
         (evt-action event)
-        (evt-params event)
+        (when (evt-output event) (evt-params event))
         
         (evt-dynamic event)
         (evt-wait-condition event)))))

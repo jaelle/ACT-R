@@ -1,6 +1,8 @@
 
 The emma.lisp file implements the EMMA extension to ACT-R as a replacement for
-the default vision module.  To use EMMA load the emma.lisp file after loadng
+the default vision module.  To use EMMA call (require-extra "emma") and placing
+that call into a model which needs it will make sure it is always loaded.
+It is also possible to manually load the emma.lisp file after loading
 the main ACT-R system, or put emma.lisp into the other-files directory to have
 it loaded automatically with the rest of the ACT-R system.  No other changes are
 necessary to use EMMA, but you may want to change the default object

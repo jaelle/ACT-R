@@ -95,6 +95,28 @@
 ;;;             :   window to prevent issues with multi-environment settings.
 ;;; 2015.06.10 Dan
 ;;;             : * Changed time to use ms instead.
+;;; 2016.04.22 Dan
+;;;             : * Started work to be able to load saved history info.  First
+;;;             :   step is adding a function to get the current data because
+;;;             :   that will be used to save current results and since this is
+;;;             :   used for two different purposes it basically needs to save
+;;;             :   the whole module.
+;;; 2016.04.28 Dan
+;;;             : * Updating the interface functions to use the stored history
+;;;             :   info instead of pulling it from the module directly.
+;;;             : * Depricated the :draw-blank-columns parameter.  Only the 
+;;;             :   box on the viewer controls that now.
+;;;             : * Took the cache table out of the module and made it global
+;;;             :   because of the possibility of loading saved data without a
+;;;             :   model present.
+;;; 2016.05.16 Dan
+;;;             : * Send the production text over for the graph display so that
+;;;             :   it can be shown in a window since can't rely on opening a 
+;;;             :   procedural viewer since saved data may not match current 
+;;;             :   assuming there even is a current model.
+;;; 2016.05.26 Dan
+;;;             : * Send the production name over in the grid column info for
+;;;             :   a more detailed whynot output.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -247,7 +269,6 @@
   draw-blanks
   current-data
   color-list
-  graph-table
   x-spacing
   y-spacing)
   
@@ -259,6 +280,8 @@
   mismatched
   info
   tag)
+
+(defvar *p-history-module-graph-cache* (make-hash-table :test 'equalp))
 
 (defun production-history-reward-markers (reward)
   (declare (ignore reward))
@@ -306,34 +329,37 @@
     (push block (p-history-module-history history))
     nil)))
 
-(defun production-history-chart-data (item)
-  (declare (ignore item))
-  (let ((history (get-module production-history)))
+(defun production-history-chart-data (draw-blank key)
+  
+  (let* ((history (get-history-information :save-p-history key))
+         (module (second history)))
     
-    (when (null (p-history-module-current-data history))
-      (parse-production-history-chart-data))
+    (when (null (p-history-module-current-data module))
+      (parse-production-history-chart-data draw-blank history))
     
-    (let ((data (p-history-module-current-data history)))
+    (let ((data (p-history-module-current-data module)))
       (if (> (length data) 200)
           (let ((results (subseq data 0 200)))
-            (setf (p-history-module-current-data history) (subseq data 200))    
+            (setf (p-history-module-current-data module) (subseq data 200))    
             (mapcar (lambda (x) (format nil "~{~S ~}" x)) results))
         (progn
-          (setf (p-history-module-current-data history) nil)    
+          (setf (p-history-module-current-data module) nil)
           (mapcar (lambda (x) (format nil "~{~S ~}" x)) (push (list 'done) data)))))))
 
-(defun parse-production-history-chart-data ()
+(defun parse-production-history-chart-data (draw-blank data)
   (let* ((results nil)
-         (history (get-module production-history))
-         (p-names (all-productions))
+         (history (second data))
+         (p-names-and-texts (first data))
+         (p-names (mapcar 'car p-names-and-texts))
          (columns 0)
-         (name-size (apply 'max (mapcar (lambda (x) (length (symbol-name x))) p-names))))
+         (name-size (if p-names-and-texts (apply 'max (mapcar (lambda (x) (length (symbol-name x))) p-names)) 5)))
     
     
     (dolist (x (p-history-module-history history))
-      (when (and (or (p-history-module-draw-blanks history)
+      (when (and (or draw-blank
                      (or (p-history-selected x) (p-history-matched x)))
                  (null (p-history-tag x)))
+        
         (let ((col (list 'column (format nil "~/print-time-in-seconds/" (p-history-time x)))))
           (dolist (y p-names)
             
@@ -351,11 +377,13 @@
                    (push-last 2 col)
                    (let ((utilities (cdr (assoc y (p-history-info x)))))
                      (push-last (first utilities) col)
-                     (push-last (second utilities) col)))))
+                     (push-last (second utilities) col))))
+            
+            (push-last y col))
           (incf columns)
           (push col results))))
     
-    (push (cons 'labels p-names) results)
+    (push (append (list 'labels (length p-names)) p-names (mapcar 'cdr p-names-and-texts)) results)
     (push (list 'colors 
                 (aif (nth 0 (p-history-module-color-list history)) it "#44DA22")
                 (aif (nth 1 (p-history-module-color-list history)) it "#FCA31D")
@@ -373,9 +401,9 @@
 (defstruct (p-history-display (:conc-name phd-)) name x y color width links starts ends utilities)
 (defstruct (p-history-cache (:conc-name phc-)) offsets holes max-loops max height min-u max-u)
 
-(defun parse-production-history-graph (which)
-  (let ((nodes (mapcar (lambda (x) (make-p-history-node :name x :links nil)) (all-productions)))
-        (history (get-module production-history))
+(defun parse-production-history-graph (module-data which)
+  (let ((nodes (mapcar (lambda (x) (make-p-history-node :name x :links nil)) (mapcar 'car (first module-data))))
+        (history (second module-data))
         (loops nil)
         (current-loop nil)
         (cycle 0)
@@ -532,8 +560,6 @@
                  (when (eq :stop (p-history-tag x))
                    (setf stop-utilities (p-history-info x)))
                  
-                 
-                 
                  (when (and current-loop (eq :reward (p-history-tag x)))
                    
                    ;; set the current scores
@@ -614,111 +640,111 @@
 
 
 (defun remove-p-history-entry (name)
- (remhash name (p-history-module-graph-table (get-module production-history))))
+ (remhash name *p-history-module-graph-cache*))
 
 
-(defun create-production-graph-coords (name which number with-labels show-unused)
-  (let ((module (get-module production-history)))
-    
-    (if (p-history-module-history module)
-      (multiple-value-bind (value exists) (if with-labels (values nil nil) (gethash name (p-history-module-graph-table module)))
-      
-      (if exists
-          (p-history-display-output which number with-labels (phc-offsets value) (phc-holes value) (phc-max-loops value) (phc-max value) (phc-height value) (phc-min-u value) (phc-max-u value))
-        
-        
-        (let* ((layer-data (parse-production-history-graph :cycle))
-               (data (if (find which '(:freq :all :color :cycle)) layer-data (parse-production-history-graph which)))
-               (min-u (first (fifth data)))
-               (max-u (second (fifth data)))
-               (unused (all-productions))
-               (current (car data))
-               (next nil)
-               (layers nil)
-               (start (caar data))
-               (end (second data))
-               (max-loops (case which
-                            ((:all :freq) 0)
-                            ((:run-color :color) (first (fourth data)))
-                            ((:run :cycle :utility) (second (fourth data))))))
+(defun create-production-graph-coords (name which number with-labels show-unused key)
+  (let ((module-data (get-history-information :save-p-history key)))
+    (if module-data
+        (multiple-value-bind (value exists) (if with-labels (values nil nil) (gethash name *p-history-module-graph-cache*))
           
-          (while current
-            (dolist (x current)
-              (setf unused (remove x unused)))
-            (dolist (x current)
-              (dolist (y (phn-links (find x (third layer-data) :key 'phn-name)))
-                (when (and (phl-count y) (find (phl-target y) unused))
-                  (setf unused (remove (phl-target y) unused))
-                  (push (phl-target y) next))))
-            (push current layers)
-            (setf current next)
-            (setf next nil))
-          
-          (when (and unused show-unused)
-            (push unused layers))
-          
-          (let ((max 0)
-                (cur 0)
-                (y 65)
-                (offsets nil)
-                (widths nil)
-                (holes nil)
-                (max-width (* 10 (apply 'max (mapcar (lambda (x) (length (symbol-name x))) (all-productions))))))
+          (if exists
+              (p-history-display-output module-data which number with-labels (phc-offsets value) (phc-holes value) (phc-max-loops value) (phc-max value) (phc-height value) (phc-min-u value) (phc-max-u value))
             
-            (dolist (layer (reverse layers))
-              (let ((hole (list (round (p-history-module-x-spacing module) 2))))
+            (let* ((module (second module-data))
+                   (layer-data (parse-production-history-graph module-data :cycle))
+                   (data (if (find which '(:freq :all :color :cycle)) layer-data (parse-production-history-graph module-data which)))
+                   (min-u (first (fifth data)))
+                   (max-u (second (fifth data)))
+                   (all-production-names (mapcar 'car (first module-data)))
+                   (unused all-production-names)
+                   (current (car data))
+                   (next nil)
+                   (layers nil)
+                   (start (caar data))
+                   (end (second data))
+                   (max-loops (case which
+                                ((:all :freq) 0)
+                                ((:run-color :color) (first (fourth data)))
+                                ((:run :cycle :utility) (second (fourth data))))))
+              
+              (while current
+                (dolist (x current)
+                  (setf unused (remove x unused)))
+                (dolist (x current)
+                  (dolist (y (phn-links (find x (third layer-data) :key 'phn-name)))
+                    (when (and (phl-count y) (find (phl-target y) unused))
+                      (setf unused (remove (phl-target y) unused))
+                      (push (phl-target y) next))))
+                (push current layers)
+                (setf current next)
+                (setf next nil))
+              
+              (when (and unused show-unused)
+                (push unused layers))
+              
+              (let ((max 0)
+                    (cur 0)
+                    (y 65)
+                    (offsets nil)
+                    (widths nil)
+                    (holes nil)
+                    (max-width (* 10 (apply 'max (mapcar (lambda (x) (length (symbol-name x))) all-production-names)))))
                 
-                (setf cur 0)
-                (dolist (item layer)
-                  (let ((width (if (eq which :utility) max-width (* 10 (length (symbol-name item))))))
-                    (push (make-p-history-display :name item :links (awhen (find item (third data) :key 'phn-name) (phn-links it)) :width width :x (+ cur (round width 2)) :y y 
-                                                  :starts (case which
-                                                            ((:all :freq) (if (eq item start) (list 0) nil))
-                                                            ((:cycle :run :utility)  (phn-cycle-starts (find item (third data) :key 'phn-name)))
-                                                            ((:color :run-color)  (phn-color-starts (find item (third data) :key 'phn-name))))
-                                                  
-                                                  :ends (case which
-                                                          ((:all :freq) (if (eq item end) (list 0) nil))
-                                                          ((:cycle :run :utility)  (phn-cycle-ends (find item (third data) :key 'phn-name)))
-                                                          ((:color :run-color)  (phn-color-ends (find item (third data) :key 'phn-name))))
-                                                  
-                                                  :color (if (find item unused) 'gray 'black)
-                                                  :utilities (awhen (find item (third data) :key 'phn-name) (phn-utilities it)))
-                          offsets) ; (cons item (cons (+ cur (round width 2)) y)) offsets)
-                    (when (= (length hole) 1)
-                      (push (- cur (round (p-history-module-x-spacing module) 2)) hole))
-                    (push (+ cur width (round (p-history-module-x-spacing module) 2)) hole)
-                    (incf cur (+ width (p-history-module-x-spacing module)))))
-                (decf cur (p-history-module-x-spacing module))
-                (when (> cur max)
-                  (setf max cur))
-                (push (cons cur y) widths)
-                (push-last y hole)
-                (push hole holes)
-                (incf y (+ 30 (p-history-module-y-spacing module)))))
-            
-            (incf max (* 2 (p-history-module-x-spacing module)))
-            (setf holes (mapcar (lambda (x) (reverse (cons (- max (round (p-history-module-x-spacing module) 2)) x))) holes))
-            
-            (dolist (w widths)
-              (unless (= (car w) max)
-                (dolist (o offsets)
-                  (when (= (phd-y o) (cdr w))
-                    (incf (phd-x o) (round (- max (car w)) 2))))
+                (dolist (layer (reverse layers))
+                  (let ((hole (list (round (p-history-module-x-spacing module) 2))))
+                    
+                    (setf cur 0)
+                    (dolist (item layer)
+                      (let ((width (if (eq which :utility) max-width (* 10 (length (symbol-name item))))))
+                        (push (make-p-history-display :name item :links (awhen (find item (third data) :key 'phn-name) (phn-links it)) :width width :x (+ cur (round width 2)) :y y 
+                                                      :starts (case which
+                                                                ((:all :freq) (if (eq item start) (list 0) nil))
+                                                                ((:cycle :run :utility)  (phn-cycle-starts (find item (third data) :key 'phn-name)))
+                                                                ((:color :run-color)  (phn-color-starts (find item (third data) :key 'phn-name))))
+                                                      
+                                                      :ends (case which
+                                                              ((:all :freq) (if (eq item end) (list 0) nil))
+                                                              ((:cycle :run :utility)  (phn-cycle-ends (find item (third data) :key 'phn-name)))
+                                                              ((:color :run-color)  (phn-color-ends (find item (third data) :key 'phn-name))))
+                                                      
+                                                      :color (if (find item unused) 'gray 'black)
+                                                      :utilities (awhen (find item (third data) :key 'phn-name) (phn-utilities it)))
+                              offsets) ; (cons item (cons (+ cur (round width 2)) y)) offsets)
+                        (when (= (length hole) 1)
+                          (push (- cur (round (p-history-module-x-spacing module) 2)) hole))
+                        (push (+ cur width (round (p-history-module-x-spacing module) 2)) hole)
+                        (incf cur (+ width (p-history-module-x-spacing module)))))
+                    (decf cur (p-history-module-x-spacing module))
+                    (when (> cur max)
+                      (setf max cur))
+                    (push (cons cur y) widths)
+                    (push-last y hole)
+                    (push hole holes)
+                    (incf y (+ 30 (p-history-module-y-spacing module)))))
                 
-                (let ((h (find (cdr w) holes :key 'car)))
-                  (setf holes (cons (concatenate 'list (subseq h 0 2)  (mapcar (lambda (x) (+ x (round (- max (car w)) 2))) (subseq (butlast h) 2)) (last h)) (remove h holes))))))
-            
-            (setf (gethash name (p-history-module-graph-table module)) (make-p-history-cache :offsets offsets :holes holes :max-loops max-loops :max max :height y :min-u min-u :max-u max-u))
-            
-            (p-history-display-output which number with-labels offsets holes max-loops max y min-u max-u)))))
-      (list "size 300 40" "label \"no graph data to display\" 150 20 0 0 299 39 red" "cycles 0" "done"))))
+                (incf max (* 2 (p-history-module-x-spacing module)))
+                (setf holes (mapcar (lambda (x) (reverse (cons (- max (round (p-history-module-x-spacing module) 2)) x))) holes))
+                
+                (dolist (w widths)
+                  (unless (= (car w) max)
+                    (dolist (o offsets)
+                      (when (= (phd-y o) (cdr w))
+                        (incf (phd-x o) (round (- max (car w)) 2))))
+                    
+                    (let ((h (find (cdr w) holes :key 'car)))
+                      (setf holes (cons (concatenate 'list (subseq h 0 2)  (mapcar (lambda (x) (+ x (round (- max (car w)) 2))) (subseq (butlast h) 2)) (last h)) (remove h holes))))))
+                
+                (setf (gethash name *p-history-module-graph-cache*) (make-p-history-cache :offsets offsets :holes holes :max-loops max-loops :max max :height y :min-u min-u :max-u max-u))
+                
+                (p-history-display-output module-data which number with-labels offsets holes max-loops max y min-u max-u)))))
+      (list "size 300 40" "label \"no graph data to display\" 150 20 0 0 299 39 red \"\"" "cycles 0" "done"))))
       
-(defun p-history-display-output (which number with-labels offsets holes max-loops max height min-u max-u)
+(defun p-history-display-output (data which number with-labels offsets holes max-loops max height min-u max-u)
   (let ((min-time -1)
         (max-time -1)
         (links nil)
-        (module (get-module production-history))
+        (module (second data))
         (max-link-count 0)
         (equal-link-counts t))
     
@@ -909,13 +935,14 @@
               (dolist (x offsets)
                 
                 (when with-labels
-                  (push (format nil "label ~S ~d ~d ~d ~d ~d ~d ~s" 
+                  (push (format nil "label ~S ~d ~d ~d ~d ~d ~d ~s ~s" 
                           (phd-name x) (phd-x x) (phd-y x) 
                           (- (phd-x x) (round (phd-width x) 2))
                           (- (phd-y x) 15)
                           (+ (phd-x x) (round (phd-width x) 2))
                           (+ (phd-y x) 15)
-                          (if (keywordp (phd-color x)) 'black (phd-color x)))
+                          (if (keywordp (phd-color x)) 'black (phd-color x))
+                          (cdr (assoc (phd-name x) (first data))))
                         results))
                 
                 
@@ -1013,7 +1040,7 @@
    (when (eq which :unique-run)
      (setf which :run-color))
    
-   (let* ((data (parse-production-history-graph which))
+   (let* ((data (parse-production-history-graph (list (mapcar 'list (all-productions)) (get-module production-history)) which))
           (unused (all-productions))
           (start (caar data))
           (end (second data))
@@ -1114,8 +1141,7 @@
 
 (defun reset-p-history-module (module)
   (setf (p-history-module-history module) nil)
-  (setf (p-history-module-why-not-list module) nil)
-  (setf (p-history-module-graph-table module) (make-hash-table :test 'equalp)))
+  (setf (p-history-module-why-not-list module) nil))
   
 (defun params-p-history-module (instance param)
   (if (consp param)
@@ -1174,7 +1200,7 @@
           :documentation "The colors to use for the selected, other matched, and mismatched cells respectively.") 
         (define-parameter :draw-blank-columns :valid-test 'tornil :default-value t
           :warning "T or nil" 
-          :documentation "Whether or not to draw the columns which have no matched productions.")
+          :documentation "This parameter is depricated and has no effect.")
         
         (define-parameter :p-history-graph-x :valid-test (lambda (x) (and (numberp x) (nonneg x) (integerp x))) :default-value 40
           :warning "non-negative integer" 
@@ -1190,6 +1216,14 @@
   :version "1.1"
   :documentation "Module to record production history for display in the environment.")
   
+
+
+(defun get-p-history-data ()
+  (let ((module (get-module production-history)))
+    (when module
+      (list (mapcar (lambda (x) (cons x (capture-model-output (pp-fct (list x))))) (all-productions)) module))))
+
+
 
 #|
 This library is free software; you can redistribute it and/or

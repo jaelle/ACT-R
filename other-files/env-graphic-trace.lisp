@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : env-graphic-trace.lisp
-;;; Version     : 1.0
+;;; Version     : 2.0
 ;;; 
 ;;; Description : Support for a quick and dirty graphic display of the 
 ;;;               buffer trace info through the environment connection.
@@ -58,6 +58,29 @@
 ;;;             :   production breaks cause 'bad' production events to be recorded.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2016.04.29 Dan [2.0]
+;;;             : * Updating for use with the saved data approach and doing some
+;;;             :   slight reorganizing of the data for the display.
+;;; 2016.05.03 Dan
+;;;             : * Parse-trace-list now returns the trace from the buffers in
+;;;             :   the trace not those set with :save-buffer-trace since it could
+;;;             :   be set to ones that weren't traced.
+;;;             : * Similarly, it's got to pull the time from the data as well.
+;;;             : * Also needs color info from productions, but not sure how to
+;;;             :   deal with that yet.
+;;; 2016.05.04 Dan
+;;;             : * Saving production and width info with the buffer trace for
+;;;             :   the environment by simply making a list of the three for
+;;;             :   the new get-environment-buffer-trace.
+;;; 2016.05.05 Dan
+;;;             : * Added the end time to the get-environment-buffer-trace data
+;;;             :   so that it doesn't call mp-time-ms when drawing an unfinished
+;;;             :   rectangle.
+;;;             : * Adding the buffer name to the rectangle data passed over to
+;;;             :   the environment side.
+;;; 2016.05.27 Dan
+;;;             : * Added an extra 100ms to the end time passed for the graphic
+;;;             :   traces so that what happens at the end should be visible.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -138,21 +161,30 @@
 (extend-productions color)
 (unsuppress-extension-warnings)
 
+(defun get-environment-buffer-trace ()
+  (when (current-model) 
+    (no-output
+     (list (get-current-buffer-trace)
+           (mapcan (lambda (x) (awhen (production-color x) (list (cons (symbol-name x) it)))) (all-productions))
+           (car (sgp :buffer-trace-colors))
+           (car (sgp :graphic-column-widths))
+           (mp-time-ms)))))
 
-(defun vert-graphic-trace-return (x)
-  (declare (ignore x))
-  (let ((data (parse-trace-list (get-current-buffer-trace) :vertical))
-        (result nil))
-    (push (list 'size 0 (mp-time-ms)) data)
+
+(defun vert-graphic-trace-return (key)
+  (let* ((d (get-history-information :save-buffer-trace key))
+         (data (parse-trace-list d :vertical))
+         (result nil))
+    (push (list 'size 0 (+ 100 (buffer-record-ms-time (first (last (first d)))))) data)
     (dolist (x data)
       (push-last (format nil "~{~S ~}" x) result))
     result))
 
-(defun hor-graphic-trace-return (x)
-  (declare (ignore x))
-  (let ((data (parse-trace-list (get-current-buffer-trace) :horizontal))
+(defun hor-graphic-trace-return (key)
+  (let* ((d (get-history-information :save-buffer-trace key))
+         (data (parse-trace-list d :horizontal))
         (result nil))
-    (push (list 'size 0 (mp-time-ms)) data)
+    (push (list 'size 0 (+ 100 (buffer-record-ms-time (first (last (first d)))))) data)
     (dolist (x data)
       (push-last (format nil "~{~S ~}" x) result))
     result))
@@ -180,121 +212,125 @@
       
       default-widths)))                   
 
-(defun parse-trace-list (trace dir)
-  (let* ((b (no-output (car (sgp :traced-buffers))))
-         (buffers (if (listp b) b (buffers)))
-         (y 0)
-         (y-inc (min 50 (floor (/ 380 (length buffers)))))
-         (x-coord 0)
-         (x-inc (min 190 (floor (/ 960 (length buffers)))))
-         (all-data nil)
-         (colors (no-output (car (sgp :buffer-trace-colors))))
-         (widths (no-output (car (sgp :graphic-column-widths))))
-         (color-list (create-color-list (if (and (listp b) colors) colors nil) buffers *gt-colors*))
-         (widths-list (create-widths-list (if (and (listp b) widths) widths nil) buffers (make-list (length buffers) :initial-element x-inc))))
+(defun parse-trace-list (data dir)
+  (destructuring-bind (trace prod-colors colors widths end-time) data
+    (let* ((buffers (mapcar 'buffer-summary-name (buffer-record-buffers (first trace))))
+           (y 0)
+           (y-inc (min 50 (floor (/ 380 (length buffers)))))
+           (x-coord 0)
+           (x-inc (min 190 (floor (/ 960 (length buffers)))))
+           (all-data nil)
+           (color-list (create-color-list colors buffers *gt-colors*))
+           (widths-list (create-widths-list widths buffers (make-list (length buffers) :initial-element x-inc))))
     
-    (let ((buffer-index 0))
-    (dolist (x buffers)
-      ;(format t "Buffer: ~S~%" x)
-      (let ((rects nil)
-            (current-rect nil))
-          (dolist (z trace)
-          ;(format t "Record: ~S~%" z)
-                      
-          (let ((record (find x (buffer-record-buffers z) :key 'buffer-summary-name)))
-            (if current-rect
-                (progn
-                  (awhen (buffer-summary-chunk-name record)
-                         (setf (gt-rect-chunk current-rect) it))
-                  
-                  (awhen (buffer-summary-notes record)
-                         (setf (gt-rect-notes current-rect) it))
-                  
-                  (when (or (null (buffer-summary-busy record))
-                            (buffer-summary-busy->free record)
-                            (buffer-summary-request record))
-                    
-                    (setf (gt-rect-end current-rect) (buffer-record-ms-time z))
-                    (push current-rect rects)
-                    (if (buffer-summary-request record)
-                        (setf current-rect (make-gt-rect :start (buffer-record-ms-time z)
-                                                         :request (buffer-summary-request record)))
-                      (setf current-rect nil))))
+      (let ((buffer-index 0))
+        (dolist (x buffers)
+          ;(format t "Buffer: ~S~%" x)
+          (let ((rects nil)
+                (current-rect nil))
+            (dolist (z trace)
+              ;(format t "Record: ~S~%" z)
               
-              (if (buffer-summary-busy record)
-                  (if (and (buffer-summary-request record) 
-                           (or (buffer-summary-chunk-name record)
-                               (and (buffer-summary-error record)
-                                    (not (buffer-summary-error->clear record)))
-                               (buffer-summary-busy->free record)))
-                      (push (make-gt-rect :start (buffer-record-ms-time z)
-                                          :end (buffer-record-ms-time z)
-                                          :request (buffer-summary-request record)
-                                          :chunk (buffer-summary-chunk-name record)
-                                          :notes (buffer-summary-notes record))
-                            rects)
-                    (setf current-rect (make-gt-rect :start (buffer-record-ms-time z)
-                                                     :request (buffer-summary-request record)
-                                                     :chunk (buffer-summary-chunk-name record)
-                                                     :notes (buffer-summary-notes record))))
-                (if (buffer-summary-request record)
-                    (push (make-gt-rect :start (buffer-record-ms-time z) :end (buffer-record-ms-time z)
-                                        :request (buffer-summary-request record)
-                                        :chunk (buffer-summary-chunk-name record)
-                                        :notes (buffer-summary-notes record))
-                          rects)
-                  (when (buffer-summary-chunk-name record)
-                    (push (make-gt-rect :start (buffer-record-ms-time z) :end (buffer-record-ms-time z)
-                                        :request (buffer-summary-request record)
-                                        :chunk (buffer-summary-chunk-name record)
-                                        :notes (buffer-summary-notes record))
-                          rects)))))))
-        
-        (dolist (z rects)
-          ;(pprint z)
-          (if (eq dir :horizontal)
-              (push (list 'rectangle (gt-rect-start z) y (aif (gt-rect-end z) it (mp-time-ms)) (+ y y-inc) 
-                          
-                          (if (and (eq x 'production)
-                                   (gt-rect-request z)
-                                   (production-color (read-from-string (gt-rect-request z)))
-                                   (stringp (production-color (read-from-string (gt-rect-request z)))))
-                              (production-color (read-from-string (gt-rect-request z)))
-                            (nth buffer-index color-list))
-                          
-                          (gt-rect-request z) (gt-rect-chunk z) 
-                          (if (gt-rect-notes z)
-                              (format nil "~a" (gt-rect-notes z))
-                            nil))
-                    all-data)
-            
-            (push (list 'rectangle x-coord (gt-rect-start z) 
-                        (+ x-coord (nth buffer-index widths-list)) (aif (gt-rect-end z) it (mp-time-ms))  
-                                                
-                        (if (and (eq x 'production)
-                                 (gt-rect-request z)
-                                 (production-color (read-from-string (gt-rect-request z)))
-                                 (stringp (production-color (read-from-string (gt-rect-request z)))))
-                            (production-color (read-from-string (gt-rect-request z)))
-                          (nth buffer-index color-list)) 
+              (let ((record (find x (buffer-record-buffers z) :key 'buffer-summary-name)))
+                (if current-rect
+                    (progn
+                      (awhen (buffer-summary-chunk-name record)
+                             (setf (gt-rect-chunk current-rect) it))
+                      
+                      (awhen (buffer-summary-notes record)
+                             (setf (gt-rect-notes current-rect) it))
+                      
+                      (when (or (null (buffer-summary-busy record))
+                                (buffer-summary-busy->free record)
+                                (buffer-summary-request record))
                         
-                        (gt-rect-request z) (gt-rect-chunk z) 
-                        (if (gt-rect-notes z)
-                              (format nil "~a" (gt-rect-notes z))
-                            nil))
-                    all-data)))
-      
-        (if (eq dir :horizontal)
-            (push (list 'label x (+ y (floor (/ y-inc 2))) (nth buffer-index color-list)) all-data)
-          (push (list 'label x (+ x-coord (floor (/ (nth buffer-index widths-list) 2))) (nth buffer-index color-list) (nth buffer-index widths-list)) all-data)))
+                        (setf (gt-rect-end current-rect) (buffer-record-ms-time z))
+                        (push current-rect rects)
+                        (if (buffer-summary-request record)
+                            (setf current-rect (make-gt-rect :start (buffer-record-ms-time z)
+                                                             :request (buffer-summary-request record)))
+                          (setf current-rect nil))))
+              
+                  (if (buffer-summary-busy record)
+                      (if (and (buffer-summary-request record) 
+                               (or (buffer-summary-chunk-name record)
+                                   (and (buffer-summary-error record)
+                                        (not (buffer-summary-error->clear record)))
+                                   (buffer-summary-busy->free record)))
+                          (push (make-gt-rect :start (buffer-record-ms-time z)
+                                              :end (buffer-record-ms-time z)
+                                              :request (buffer-summary-request record)
+                                              :chunk (buffer-summary-chunk-name record)
+                                              :notes (buffer-summary-notes record))
+                                rects)
+                        (setf current-rect (make-gt-rect :start (buffer-record-ms-time z)
+                                                         :request (buffer-summary-request record)
+                                                         :chunk (buffer-summary-chunk-name record)
+                                                         :notes (buffer-summary-notes record))))
+                    (if (buffer-summary-request record)
+                        (push (make-gt-rect :start (buffer-record-ms-time z) :end (buffer-record-ms-time z)
+                                            :request (buffer-summary-request record)
+                                            :chunk (buffer-summary-chunk-name record)
+                                            :notes (buffer-summary-notes record))
+                              rects)
+                      (when (buffer-summary-chunk-name record)
+                        (push (make-gt-rect :start (buffer-record-ms-time z) :end (buffer-record-ms-time z)
+                                            :request (buffer-summary-request record)
+                                            :chunk (buffer-summary-chunk-name record)
+                                            :notes (buffer-summary-notes record))
+                              rects)))))))
         
+            (dolist (z rects)
+              ;(pprint z)
+              (if (eq dir :horizontal)
+                  (push (list 'rectangle (gt-rect-start z) y (aif (gt-rect-end z) it end-time) (+ y y-inc) 
+                              
+                              (aif (and (eq x 'production)
+                                        (gt-rect-request z)
+                                        (assoc (gt-rect-request z) prod-colors :test 'string-equal))
+                                   (if (stringp (cdr it))
+                                       (cdr it)
+                                     (nth buffer-index color-list))
+                                (nth buffer-index color-list))
+                          
+                              (gt-rect-request z) (gt-rect-chunk z) 
+                              (if (gt-rect-notes z)
+                                  (format nil "~a" (gt-rect-notes z))
+                                nil)
+                              (if (eq x 'production) (gt-rect-request z) (gt-rect-chunk z))
+                              x)
+                        all-data)
+                
+                (push (list 'rectangle x-coord (gt-rect-start z) 
+                            (+ x-coord (nth buffer-index widths-list)) (aif (gt-rect-end z) it end-time)  
+                            
+                            (aif (and (eq x 'production)
+                                      (gt-rect-request z)
+                                      (assoc (gt-rect-request z) prod-colors :test 'string-equal))
+                                 (if (stringp (cdr it))
+                                     (cdr it)
+                                   (nth buffer-index color-list))
+                                 (nth buffer-index color-list)) 
+                            
+                            (gt-rect-request z) (gt-rect-chunk z) 
+                            (if (gt-rect-notes z)
+                                (format nil "~a" (gt-rect-notes z))
+                              nil)
+                            (if (eq x 'production) (gt-rect-request z) (gt-rect-chunk z))
+                            x)
+                      all-data)))
             
-      (incf y y-inc)
-      (incf x-coord (nth buffer-index widths-list))
-      (incf buffer-index)))
-    
-     all-data))
-
+            (if (eq dir :horizontal)
+                (push (list 'label x (+ y (floor (/ y-inc 2))) (nth buffer-index color-list)) all-data)
+              (push (list 'label x (+ x-coord (floor (/ (nth buffer-index widths-list) 2))) (nth buffer-index color-list) (nth buffer-index widths-list)) all-data)))
+          
+          
+          (incf y y-inc)
+          (incf x-coord (nth buffer-index widths-list))
+          (incf buffer-index)))
+      
+      all-data)))
+  
 
 #|
 This library is free software; you can redistribute it and/or

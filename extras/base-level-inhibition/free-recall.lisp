@@ -3,6 +3,7 @@
 ;;; Free recall procedure without tagging to illustrate the benefits of base-level inhibition
 
 (clear-all)
+(require-extra "base-level-inhibition")
 
 ;; Variables for recording the activation and retrieval times data for graphing
 (defvar *retrieval-log* nil)

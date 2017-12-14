@@ -55,10 +55,10 @@ set window_config(.buffers) \
     "350x240+[expr $screen_center_x - 175]+[expr $screen_center_y - 120]"
 
 set window_config(.bufferstatus) \
-    "350x240+[expr $screen_center_x - 175]+[expr $screen_center_y - 120]"
+    "450x240+[expr $screen_center_x - 225]+[expr $screen_center_y - 120]"
 
 set window_config(.visicon) \
-    "660x150+[expr $screen_center_x - 330]+[expr $screen_center_y - 100]"
+    "700x150+[expr $screen_center_x - 350]+[expr $screen_center_y - 100]"
 
 set window_config(.audicon) \
     "870x150+[expr $screen_center_x - 435]+[expr $screen_center_y - 100]"
@@ -86,6 +86,23 @@ set window_config(.retrieval_history) \
 set window_config(.buffer_history) \
     "530x290+[expr $screen_center_x - 265]+[expr $screen_center_y - 100]"
 
+set window_config(.audicon_history) \
+    "734x300+[expr $screen_center_x - 367]+[expr $screen_center_y - 150]"
+
+set window_config(.visicon_history) \
+    "810x340+[expr $screen_center_x - 405]+[expr $screen_center_y - 170]"
+
+set window_config(.text_trace_history) \
+    "714x340+[expr $screen_center_x - 387]+[expr $screen_center_y - 170]"
+
+set window_config(.history_recorder) \
+    "360x390+[expr $screen_center_x - 180]+[expr $screen_center_y - 195]"
+
+set window_config(.history_playback) \
+    "512x370+[expr $screen_center_x - 256]+[expr $screen_center_y - 185]"
+
+set window_config(.save_history_response) \
+    "630x150+[expr $screen_center_x - 315]+[expr $screen_center_y - 75]"
 
 set window_config(.bold_graphs) \
     "660x250+[expr $screen_center_x - 330]+[expr $screen_center_y - 120]"

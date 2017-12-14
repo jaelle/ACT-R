@@ -1,169 +1,171 @@
 
-proc select_vert_graphic_trace {} {
+proc select_vert_graphic_trace {key current} {
   
-    # make a new one
+  set win [toplevel [new_variable_name .vert_graphic_trace]]
 
-  if {[currently_selected_model] == "nil"} {
-    tk_messageBox -icon info -type ok -title "Vertical Graphic Trace" -message "Tracing tools require a current model."
-  } else {
+  global $win.scale
 
-    set win [toplevel [new_variable_name .vert_graphic_trace]]
+  global $win.subviews
 
-    global $win.scale
+  set $win.subviews(0) 0
 
-    global $win.dm_viewer
-    set $win.dm_viewer 0
-    global $win.p_viewer
-    set $win.p_viewer 0
+  wm withdraw $win
 
-    wm withdraw $win
-
-    record_new_window $win $win
-
-    wm geometry $win [get_configuration .vert_graphic_trace $win]
-
-     
-    frame $win.frame -borderwidth 0  
+  wm geometry $win [get_configuration .vert_graphic_trace $win]
     
-    canvas $win.frame.canvas  \
-         -yscrollcommand "$win.frame.scrl set" \
-         -width 1000 -height 2000 -scrollregion {0 -4 1000 2000} -bg white
+  frame $win.frame -borderwidth 0  
+    
+  canvas $win.frame.canvas  \
+       -yscrollcommand "$win.frame.scrl set" \
+       -xscrollcommand "$win.frame.scrlx set" \
+       -width 1000 -height 2000 -scrollregion {0 -4 1000 2000} -bg white
           
           
-    scrollbar $win.frame.scrl \
-              -command "$win.frame.canvas yview" -orient vertical
+  scrollbar $win.frame.scrl \
+            -command "$win.frame.canvas yview" -orient vertical
 
-    set $win.scale 1.0
+  scrollbar $win.frame.scrlx \
+            -command "scroll_vtrace_canvas $win" -orient horizontal
 
-    bind $win <MouseWheel> " \
-     
-     if { %D < 0 } { \
-       $win.frame.canvas yview scroll 1 units \
-     } else { \
-       $win.frame.canvas yview scroll -1 units \
-     } "
+  set $win.scale 1.0
+
+  bind $win <MouseWheel> " \
+    if { %D < 0 } { \
+      $win.frame.canvas yview scroll 1 units \
+    } else { \
+      $win.frame.canvas yview scroll -1 units \
+    } "
     
+  canvas $win.canvas1  -width 1000 -height 30 -bg white \
+         -xscrollcommand "$win.frame.scrlx set" \
+         -scrollregion {0 0 1000 30} -bg white
+
+
+  label $win.text -font text_font -textvariable $win.textvar
   
-    canvas $win.canvas1  -width 1000 -height 30 -bg white
-
-
-    label $win.text -font text_font  -textvariable $win.textvar
+  set $win.textvar ""
   
-    set $win.textvar ""
-
-    label $win.note -font text_font  -text "Notes:"
+  label $win.note -font text_font  -text "Notes:"
   
-    label $win.notes -font text_font  -textvariable $win.notesvar -anchor w
+  label $win.notes -font text_font  -textvariable $win.notesvar -anchor w
   
-    set $win.notesvar ""
+  set $win.notesvar ""
 
-    ## Create a dummy handler to set the :save-buffer-trace parameter to t
-    # whenever a buffer-trace window is open.
+  label $win.request -font text_font -text "Request:"
+  
+  label $win.requests -font text_font -textvariable $win.requestvar -anchor w
+  
+  set $win.requestvar ""
 
-    send_environment_cmd \
-      "create simple-handler $win.note $win.dummy \
-         (lambda (x) (declare (ignore x)) (no-output (sgp :save-buffer-trace t)) nil) (reset) [send_model_name]"
+  label $win.chunk -font text_font -text "Chunk:"
+  
+  label $win.chunks -font text_font -textvariable $win.chunkvar -anchor w
+  
+  set $win.chunkvar ""
+ 
+  button $win.stop_gt -command [list draw_vert_items $win $key $current] -text "Get Trace" -font button_font
 
+  button $win.redisplay -command [list display_vert_data $win 1 $key $current] -text "Redisplay" -font button_font
 
-    bind $win.note <Destroy> "remove_handler $win.note"
+  button $win.zoom_in -command "vert_zoom_in $win" -text "+" -font button_font
 
-
-    button $win.stop_gt \
-      -command "draw_vert_items $win [send_model_name]" -text "Get Trace" -font button_font
-
-    send_environment_cmd \
-      "create list-handler $win.stop_gt $win.return (lambda (x) (declare (ignore x))) () [send_model_name]"
-
-    bind $win.stop_gt <Destroy> "remove_handler $win.stop_gt"
-
-    button $win.redisplay -command "display_vert_data $win 1 [send_model_name]" -text "Redisplay" -font button_font
-
-    button $win.zoom_in -command "vert_zoom_in $win" -text "+" -font button_font
-
-    button $win.zoom_out -command "vert_zoom_out $win" -text "-" -font button_font
+  button $win.zoom_out -command "vert_zoom_out $win" -text "-" -font button_font
         
-    button $win.hide_text -command "$win.frame.canvas delete trace_text" -text "Remove Text" -font button_font
+  button $win.hide_text -command "$win.frame.canvas delete trace_text" -text "Remove Text" -font button_font
  
-    button $win.save -command "save_vert_graphic_trace $win" -text "Save 1P" -font button_font
-    button $win.save2 -command "save_vert_graphic_trace_multi $win" -text "Save Multi." -font button_font
+  button $win.save -command "save_vert_graphic_trace $win" -text "Save 1P" -font button_font
+  button $win.save2 -command "save_vert_graphic_trace_multi $win" -text "Save Multi." -font button_font
 
-    button $win.save_data -command "save_v_graphic_trace_data $win" -text "Save data" -font button_font
-    button $win.read_data -command "read_v_graphic_trace_data $win" -text "Read data" -font button_font
+  button $win.hide_grid -command "$win.frame.canvas delete grid" -text "Remove Grid" -font button_font
 
-
-
-    label $win.range -font text_font -text "Range:"
-    label $win.to -font text_font -text "to"
+  label $win.range -font text_font -text "Range:"
+  label $win.to -font text_font -text "to"
  
-    entry $win.min -textvariable $win.min_extent -text "" -font text_font
-    entry $win.max -textvariable $win.max_extent -text "" -font text_font
+  entry $win.min -textvariable $win.min_extent -text "" -font text_font
+  entry $win.max -textvariable $win.max_extent -text "" -font text_font
     
-    pack $win.frame.scrl -side right -fill y
-    pack $win.frame.canvas -side top -fill both 
+  pack $win.frame.scrl -side right -fill y
+  pack $win.frame.scrlx -side bottom -fill x
+  pack $win.frame.canvas -side top -fill both 
 
-    place $win.frame -x 0 -y 30 -relwidth 1.0 -height -110 -relheight 1.0
-    place $win.canvas1  -x 0 -y 0 -relwidth 1.0 -height 30
+  place $win.frame -x 0 -y 30 -relwidth 1.0 -height -110 -relheight 1.0
+  place $win.canvas1  -x 0 -y 0 -relwidth 1.0 -height 30
     
-    place $win.note -x 0 -rely 1.0 -y -79 -width 60 -height 28
-    place $win.notes -x 60 -rely 1.0 -y -79 -relwidth 1.0 -height 28
+  place $win.note -relx 0.5 -rely 1.0 -y -75 -width 70 -height 25
+  place $win.notes -relx 0.5 -x 70 -rely 1.0 -y -75 -relwidth 0.5 -width -60 -height 25
 
-    place $win.text -x 0 -rely 1.0 -y -50 -relwidth .3 -height 49
+  place $win.request -relx 0 -rely 1.0 -y -75 -width 70 -height 25
+  place $win.requests -relx 0 -x 70 -rely 1.0 -y -75 -relwidth 0.5 -width -70 -height 25
 
-    place $win.stop_gt -relx .3 -rely 1.0 -y -50 -relwidth .1 -height 24
-    place $win.redisplay -relx .4 -rely 1.0 -y -50 -relwidth .1 -height 24
-    place $win.hide_text -relx .5 -rely 1.0 -y -50 -relwidth .1 -height 24
-    place $win.save -relx .6 -rely 1.0 -y -50 -relwidth .1 -height 24
-    place $win.save2 -relx .7 -rely 1.0 -y -50 -relwidth .1 -height 24
+  place $win.chunk -relx 0 -rely 1.0 -y -50 -width 70 -height 25
+  place $win.chunks -relx 0 -x 70 -rely 1.0 -y -50 -relwidth 0.4 -width -70 -height 25
 
-    place $win.save_data -relx .8 -rely 1.0 -y -50 -relwidth .1 -height 24
-    place $win.read_data -relx .9 -rely 1.0 -y -50 -relwidth .1 -height 24
+  place $win.text -x 0 -rely 1.0 -y -25 -relwidth .4 -height 25
 
-    place $win.zoom_in -relx .3 -rely 1.0 -y -25 -relwidth .1 -height 24
-    place $win.zoom_out -relx .4 -rely 1.0 -y -25 -relwidth .1 -height 24
-    place $win.range -relx .5 -rely 1.0 -y -25 -relwidth .07 -height 24
-    place $win.min -relx .57 -rely 1.0 -y -25 -relwidth .2 -height 24
-    place $win.to -relx .77 -rely 1.0 -y -25 -relwidth .03 -height 24
-    place $win.max -relx .8 -rely 1.0 -y -25 -relwidth .2 -height 24
+  place $win.stop_gt -relx .4 -rely 1.0 -y -50 -relwidth .1 -height 25
+  place $win.redisplay -relx .5 -rely 1.0 -y -50 -relwidth .1 -height 25
+  place $win.hide_text -relx .6 -rely 1.0 -y -50 -relwidth .1 -height 25
+  place $win.hide_grid -relx .7 -rely 1.0 -y -50 -relwidth .1 -height 25
 
-    # now show the window 
+  place $win.save -relx .8 -rely 1.0 -y -50 -relwidth .1 -height 25
+  place $win.save2 -relx .9 -rely 1.0 -y -50 -relwidth .1 -height 25
 
-    wm deiconify $win
-  }
-} 
+  place $win.zoom_in -relx .4 -rely 1.0 -y -25 -relwidth .05 -height 25
+  place $win.zoom_out -relx .45 -rely 1.0 -y -25 -relwidth .05 -height 25
+  place $win.range -relx .5 -rely 1.0 -y -25 -relwidth .07 -height 25
+  place $win.min -relx .57 -rely 1.0 -y -25 -relwidth .2 -height 25
+  place $win.to -relx .77 -rely 1.0 -y -25 -relwidth .03 -height 25
+  place $win.max -relx .8 -rely 1.0 -y -25 -relwidth .2 -height 25
+
+  # now show the window 
+
+  $win.frame.canvas yview moveto 0
+  $win.frame.canvas xview moveto 0
+
+  wm deiconify $win
+
+  return $win
+}
+ 
 
 
-button [control_panel_name].vert_graphic_trace_button \
-       -command {select_vert_graphic_trace} -text "Vert. Buffer Trace" -font button_font
+add_history_button select_vert_graphic_trace "Graphic Trace (v.)" :save-buffer-trace "Graphic trace" left get-environment-buffer-trace default-save-history-info
 
-pack [control_panel_name].vert_graphic_trace_button
+
+proc scroll_vtrace_canvas {win args} {
+   set ignore ""
+   eval [append ignore $win.frame.canvas " " xview " " $args]
+   set ignore ""
+   eval [append ignore $win.canvas1 " " xview " " $args]
+}
 
 
 proc vert_zoom_in {win} {
      
- global $win.scale
- upvar $win.scale scale
+  global $win.scale
+  upvar $win.scale scale
 
   if {$scale < 16} {
-       set scale [expr 2 * $scale]
-       $win.frame.canvas scale scale_items 0 0 1.0 2.0
-       $win.frame.canvas configure -scrollregion "0 -4 1000 [expr 2 * [lindex [$win.frame.canvas cget -scrollregion] 3]]"
-       $win.frame.canvas configure -height [expr 2 * [$win.frame.canvas cget -height]]
+    set scale [expr 2 * $scale]
+    $win.frame.canvas scale scale_items 0 0 1.0 2.0
+    $win.frame.canvas configure -scrollregion "0 -4 1000 [expr 2 * [lindex [$win.frame.canvas cget -scrollregion] 3]]"
+    $win.frame.canvas configure -height [expr 2 * [$win.frame.canvas cget -height]]
   }
 }
 
 
 proc vert_zoom_out {win} {
 
- global $win.scale
- upvar $win.scale scale
+  global $win.scale
+  upvar $win.scale scale
 
-     set scale [expr .5 * $scale]
-     $win.frame.canvas scale scale_items 0 0 1.0 0.5 
-     $win.frame.canvas configure -scrollregion "0 -4 1000 [expr .5 * [lindex [$win.frame.canvas cget -scrollregion] 3]]"
-     $win.frame.canvas configure -height [expr .5 * [$win.frame.canvas cget -height]]
-    }
+  set scale [expr .5 * $scale]
+  $win.frame.canvas scale scale_items 0 0 1.0 0.5 
+  $win.frame.canvas configure -scrollregion "0 -4 1000 [expr .5 * [lindex [$win.frame.canvas cget -scrollregion] 3]]"
+  $win.frame.canvas configure -height [expr .5 * [$win.frame.canvas cget -height]]
+}
 
-proc draw_vert_items {win model} {
+proc draw_vert_items {win key current} {
 
   global $win.return
                
@@ -178,16 +180,21 @@ proc draw_vert_items {win model} {
   $win.save configure -state disabled
   $win.save2 configure -state disabled
   $win.redisplay configure -state disabled
-  $win.save_data configure -state disabled
-  $win.read_data configure -state disabled
+  $win.hide_grid configure -state disabled
 
   set $win.return ""
                   
-  send_environment_cmd "update [get_handler_name $win.stop_gt] vert-graphic-trace-return"
+  if $current {
+    send_environment_cmd "create list-handler $win.stop_gt $win.return (lambda (x) (declare (ignore x)) (vert-graphic-trace-return '$key)) () $key"
+  } else {
+    send_environment_cmd "create list-handler $win.stop_gt $win.return (lambda (x) (declare (ignore x)) (vert-graphic-trace-return '$key)) ()"
+  }
 
   wait_for_non_null $win.return
 
-  display_vert_data $win 1 $model
+  remove_handler $win.stop_gt
+
+  display_vert_data $win 1 $key $current
 
   $win.zoom_in configure -state normal
   $win.zoom_out configure -state normal
@@ -196,15 +203,13 @@ proc draw_vert_items {win model} {
   $win.save configure -state normal
   $win.save2 configure -state normal
   $win.redisplay configure -state normal
-  $win.save_data configure -state normal
-  $win.read_data configure -state normal
-
+  $win.hide_grid configure -state normal
 
   set display "Done"
 }
 
 
-proc display_vert_data {win level model} {
+proc display_vert_data {win level key current} {
 
   $win.frame.canvas delete trace_items
   $win.canvas1 delete label_tag
@@ -229,17 +234,10 @@ proc display_vert_data {win level model} {
         label { 
           $win.frame.canvas create text [expr 40 + [lindex $x 2]] -60 -anchor n -font text_font -text [lindex $x 1] -width [lindex $x 4]  -fill [lindex $x 3] -tag trace_items
           $win.canvas1 create text [expr 40 + [lindex $x 2]] 5 -anchor n -font text_font -text [lindex $x 1] -width [lindex $x 4] -tag label_tag -fill [lindex $x 3]
-          if {[lindex $x 1] == "production"} {
-            set pop_up 1
-          } elseif {[lindex $x 1] == "retrieval"} {
-            set pop_up 2
-          } else {
-            set pop_up 0
-          }
         }
         size { 
-          $win.frame.canvas configure -height [expr [lindex $x 2] + 5]
-          $win.frame.canvas configure -scrollregion "0 -4 1000 [expr 1 + [lindex $x 2]]"
+          $win.frame.canvas configure -height [expr [lindex $x 2] + 15]
+          $win.frame.canvas configure -scrollregion "0 -4 1000 [expr 11 + [lindex $x 2]]"
         }
 
         rectangle {
@@ -252,45 +250,41 @@ proc display_vert_data {win level model} {
           }
 
 
-          if {[lindex $x 8] != "nil"} {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
-                                                      set $win.notesvar {[lindex $x 8]}" 
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
-                                                      set $win.notesvar \"\""
-          } elseif {[lindex $x 7] != "nil"} {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
-                                                      set $win.notesvar {[lindex $x 7]}"
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
-                                                      set $win.notesvar \"\""
-          } elseif {[lindex $x 6] != "nil"} {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
-                                                      set $win.notesvar {[lindex $x 6]}"
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
-                                                      set $win.notesvar \"\""
+          if {[lindex $x 6] == "nil" } {
+            set req_text ""
           } else {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\""
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\""
+            set req_text [lindex $x 6]
+          }
+          if {[lindex $x 7] == "nil" } {
+            set c_text ""
+          } else {
+            set c_text [lindex $x 7]
+          }
+          if {[lindex $x 8] == "nil" } {
+            set note_text ""
+          } else {
+            set note_text [lindex $x 8]
+          }
+          if {[lindex $x 9] == "nil" } {
+            set show_text ""
+          } else {
+            set show_text [lindex $x 9]
           }
 
+          $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
+                                                    set $win.requestvar {$req_text}
+                                                    set $win.chunkvar {$c_text}
+                                                    set $win.notesvar {$note_text}"
 
-        if {$pop_up == 1} {
-          $win.frame.canvas bind $box_name <ButtonPress> "v_trace_p_view $win [lindex $x 6] $model"
-        } elseif {$pop_up == 2 && [lindex $x 7] != "nil"} {
-          $win.frame.canvas bind $box_name <ButtonPress> "v_trace_dm_view $win [lindex $x 7] $model"
-        }
+          $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
+                                                    set $win.requestvar \"\"
+                                                    set $win.chunkvar \"\"
+                                                    set $win.notesvar \"\""
 
-                 
-          if {[lindex $x 2] == [lindex $x 4]} { 
-            if {[lindex $x 7] != "nil"} {
-              $win.frame.canvas create text [expr 40 + [lindex $x 1]] [lindex $x 4] -text [lindex $x 7] -anchor nw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
-            }
-          } else {
-            if {[lindex $x 6] != "nil"} {
-              $win.frame.canvas create text [expr 40 + [lindex $x 1]] [lindex $x 2] -text [lindex $x 6] -anchor nw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
-            }
-            if {[lindex $x 7] != "nil"} {
-              $win.frame.canvas create text [expr 40 + [lindex $x 1]] [lindex $x 4] -text [lindex $x 7] -anchor sw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
-            }
+          $win.frame.canvas bind $box_name <ButtonPress> [list history_custom_buffer_view $win $key $current [lindex $x 10] [lindex $x 2] [lindex $x 4]]
+
+          if { $show_text != ""} {
+            $win.frame.canvas create text [expr 42 + [lindex $x 1]] [lindex $x 2] -text $show_text -anchor nw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
           }
         }
       }
@@ -301,8 +295,8 @@ proc display_vert_data {win level model} {
     set x [$win.frame.canvas cget -width]
 
     while {$y <= $size} {
-      $win.frame.canvas create line 40 $y $x $y -width 1 -f gray -tag [list trace_items scale_items time_line]
-      $win.frame.canvas create text 0 $y -text [format "%.3f" [expr 0.001 * $y]] -anchor w -font graphic_trace_font -tag [list trace_items scale_items]
+      $win.frame.canvas create line 40 $y $x $y -width 1 -f gray -tag [list trace_items scale_items time_line grid]
+      $win.frame.canvas create text 0 $y -text [format "%.3f" [expr 0.001 * $y]] -anchor w -font graphic_trace_font -tag [list trace_items scale_items grid]
       incr y 50
     }
 
@@ -315,8 +309,8 @@ proc display_vert_data {win level model} {
     set min_y [expr int( floor ($min_y * 1000))]
     set max_y [expr int( floor ($max_y * 1000))]
 
-    $win.frame.canvas configure -height [expr $max_y - $min_y + 5]
-    $win.frame.canvas configure -scrollregion "0 -4 1000 [expr 1 + $max_y - $min_y]"
+    $win.frame.canvas configure -height [expr $max_y - $min_y + 15]
+    $win.frame.canvas configure -scrollregion "0 -4 1000 [expr 11 + $max_y - $min_y]"
 
  foreach x $result {
   
@@ -324,13 +318,6 @@ proc display_vert_data {win level model} {
         label { 
           $win.frame.canvas create text [expr 40 + [lindex $x 2]] -60 -anchor n -font text_font -text [lindex $x 1] -width [lindex $x 4]  -fill [lindex $x 3] -tag trace_items
           $win.canvas1 create text [expr 40 + [lindex $x 2]] 5 -anchor n -font text_font -text [lindex $x 1] -width [lindex $x 4] -tag label_tag -fill [lindex $x 3]
-          if {[lindex $x 1] == "production"} {
-            set pop_up 1
-          } elseif {[lindex $x 1] == "retrieval"} {
-            set pop_up 2
-          } else {
-            set pop_up 0
-          }
         }
      
         rectangle {
@@ -361,45 +348,41 @@ proc display_vert_data {win level model} {
               $win.frame.canvas configure -width [expr 40 + [lindex $x 3]]
             }
 
-          if {[lindex $x 8] != "nil"} {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
-                                                      set $win.notesvar {[lindex $x 8]}"
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
-                                                      set $win.notesvar \"\""
-          } elseif {[lindex $x 7] != "nil"} {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
-                                                      set $win.notesvar {[lindex $x 7]}"
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
-                                                      set $win.notesvar \"\""
-          } elseif {[lindex $x 6] != "nil"} {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
-                                                      set $win.notesvar {[lindex $x 6]}"
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
-                                                      set $win.notesvar \"\""
-          } else {
-            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\""
-            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\""
-          }
-                 
-          if {$pop_up == 1} {
-            $win.frame.canvas bind $box_name <ButtonPress> "v_trace_p_view $win [lindex $x 6] $model"
-          } elseif {$pop_up == 2 && [lindex $x 7] != "nil"} {
-            $win.frame.canvas bind $box_name <ButtonPress> "v_trace_dm_view $win [lindex $x 7] $model"
-          }
-
-
-
-            if {[lindex $x 2] == [lindex $x 4]} { 
-              if {[lindex $x 7] != "nil"} {
-                $win.frame.canvas create text [expr 40 + [lindex $x 1]] $y2 -text [lindex $x 7] -anchor nw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
-              }
+            if {[lindex $x 6] == "nil" } {
+              set req_text ""
             } else {
-              if {[lindex $x 6] != "nil"} {
-                $win.frame.canvas create text [expr 40 + [lindex $x 1]] $y1 -text [lindex $x 6] -anchor nw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
-              }
-              if {[lindex $x 7] != "nil"} {
-                $win.frame.canvas create text [expr 40 + [lindex $x 1]] $y2 -text [lindex $x 7] -anchor sw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
-              }
+              set req_text [lindex $x 6]
+            }
+            if {[lindex $x 7] == "nil" } {
+              set c_text ""
+            } else {
+              set c_text [lindex $x 7]
+            }
+            if {[lindex $x 8] == "nil" } {
+              set note_text ""
+            } else {
+              set note_text [lindex $x 8]
+            }
+            if {[lindex $x 9] == "nil" } {
+              set show_text ""
+            } else {
+              set show_text [lindex $x 9]
+            }
+
+            $win.frame.canvas bind $box_name <Enter> "set $win.textvar \"[format "%.3f" [expr 0.001 * ([lindex $x 4] - [lindex $x 2])]]: [format "%.3f" [expr 0.001 * [lindex $x 2]]] - [format "%.3f" [expr 0.001 * [lindex $x 4]]]\" 
+                                                      set $win.requestvar {$req_text}
+                                                      set $win.chunkvar {$c_text}
+                                                      set $win.notesvar {$note_text}"
+
+            $win.frame.canvas bind $box_name <Leave> "set $win.textvar \"\" 
+                                                      set $win.requestvar \"\"
+                                                      set $win.chunkvar \"\"
+                                                      set $win.notesvar \"\""
+                 
+            $win.frame.canvas bind $box_name <ButtonPress> [list history_custom_buffer_view $win $key $current [lindex $x 10] [lindex $x 2] [lindex $x 4]]
+
+            if { $show_text != ""} {
+              $win.frame.canvas create text [expr 42 + [lindex $x 1]] $y1 -text $show_text -anchor nw -font graphic_trace_font -tag [list trace_items trace_text $box_name scale_items] -width [expr [lindex $x 3] - [lindex $x 1]]
             }
           }
         }
@@ -410,8 +393,8 @@ proc display_vert_data {win level model} {
     set x [$win.frame.canvas cget -width]
 
     while {$y <= $max_y} {
-      $win.frame.canvas create line 40 [expr $y - $min_y] $x [expr $y - $min_y] -width 1 -f gray -tag [list trace_items scale_items time_line]
-      $win.frame.canvas create text 0 [expr $y - $min_y] -text [format "%.3f" [expr 0.001 * $y]] -anchor w -font graphic_trace_font -tag [list trace_items scale_items]
+      $win.frame.canvas create line 40 [expr $y - $min_y] $x [expr $y - $min_y] -width 1 -f gray -tag [list trace_items scale_items time_line grid]
+      $win.frame.canvas create text 0 [expr $y - $min_y] -text [format "%.3f" [expr 0.001 * $y]] -anchor w -font graphic_trace_font -tag [list trace_items scale_items grid]
       incr y 50
     }
 
@@ -513,32 +496,6 @@ proc v_trace_p_view {win prod model} {
     $box selection set $index
 
     event generate $box <<ListboxSelect>>
-  }
-}
-
-proc save_v_graphic_trace_data {win} {
-  set fname [tk_getSaveFile -title "Save graphic trace data" -filetypes {{"All files" "*.*"}}]
-
-  if {$fname != ""} {  
-    upvar $win.return return
-    write_data $return $fname
-  }
-}
-
-proc read_v_graphic_trace_data {win} {
-
-  set fname [tk_getOpenFile -title "Load graphic trace data" -filetypes {{"All files" "*.*"}}]
-
-  if {$fname != ""} {  
-
-    set fileid [open $fname "r"]
-    upvar $win.return return
-    set return [read $fileid]  
-    close $fileid
-    
-    $win.canvas1 delete label_tag
-    display_vert_data $win 2 "Loaded from File"
-
   }
 }
 

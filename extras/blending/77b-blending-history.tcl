@@ -1,15 +1,9 @@
 
-proc make_blending_history_viewer {} {
+proc make_blending_history_viewer {key current} {
   
-  if {[currently_selected_model] == "nil"} {
-    tk_messageBox -icon info -type ok -title "Blending History" -message "Tracing tools require a current model."
-  } else {
-
   set win [toplevel [new_variable_name .blend_history]]
   
   wm withdraw $win
-
-  record_new_window $win $win
 
   wm geometry $win [get_configuration .blend_history $win]
   
@@ -24,15 +18,17 @@ proc make_blending_history_viewer {} {
                         -exportselection 0 -font list_font]
 
   
-  send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 \
-                        (lambda (x) (declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 dummy-env-handler nil $key"
+  } else {
+    send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 dummy-env-handler nil"
+  }  
   
   bind $list_box_1 <Destroy> {
     remove_handler %W
   }
   
-  set list_scroll_bar_1 [scrollbar $list_frame_1.list_scrl \
-                                 -command "$list_box_1 yview"]
+  set list_scroll_bar_1 [scrollbar $list_frame_1.list_scrl -command "$list_box_1 yview"]
 
   # Frame and list box for chunks
 
@@ -45,18 +41,17 @@ proc make_blending_history_viewer {} {
                         -exportselection 0 -font list_font]
 
   
-  send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 \
-                        (lambda (x) (declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 dummy-env-handler nil $key"
+  } else {
+    send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 dummy-env-handler nil"
+  }
   
   bind $list_box_2 <Destroy> {
     remove_handler %W
   }
   
-  set list_scroll_bar_2 [scrollbar $list_frame_2.list_scrl \
-                                 -command "$list_box_2 yview"]
-
-
-
+  set list_scroll_bar_2 [scrollbar $list_frame_2.list_scrl -command "$list_box_2 yview"]
 
   # The lables for the sections
 
@@ -70,14 +65,6 @@ proc make_blending_history_viewer {} {
 
 
 
-  send_environment_cmd \
-      "create list-handler $l1 $win.dummy \
-         (lambda (x) (declare (ignore x)) (no-output (sgp :save-blending-history t :sact t :sblt t)) nil) (reset) [send_model_name]"
-
-
-  bind $l1 <Destroy> "remove_handler $l1"
-
-
   # frame for the chunk display
 
   set text_frame_1 [frame $win.text_frame_1 -borderwidth 0]  
@@ -87,8 +74,11 @@ proc make_blending_history_viewer {} {
                      -xscrollcommand "$text_frame_1.text_scrl_x set" \
                      -font text_font -wrap none]
   
-  send_environment_cmd "create text-output-handler $text_box_1 $text_box_1 \
-                        (lambda (x)(declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_1 $text_box_1 dummy-env-handler nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_1 $text_box_1 dummy-env-handler nil"
+  }
 
   bind $text_box_1 <Destroy> {
     remove_handler %W
@@ -111,8 +101,11 @@ proc make_blending_history_viewer {} {
                      "$text_frame_2.text_scrl set"  \
                      -font text_font]
   
-  send_environment_cmd "create text-output-handler $text_box_2 $text_box_2 \
-                        (lambda (x)(declare (ignore x)) \"HI\") nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_2 $text_box_2 (lambda (x)(declare (ignore x)) \"HI\") nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_2 $text_box_2 (lambda (x)(declare (ignore x)) \"HI\") nil"
+  }
 
   bind $text_box_2 <Destroy> {
     remove_handler %W
@@ -120,9 +113,7 @@ proc make_blending_history_viewer {} {
   
   bind $text_box_2 <1> {focus %W}
 
-  set text_scroll_bar_2 [scrollbar $text_frame_2.text_scrl \
-                                 -command "$text_box_2 yview"]
-
+  set text_scroll_bar_2 [scrollbar $text_frame_2.text_scrl -command "$text_box_2 yview"]
 
  # frame for the activation display
 
@@ -133,8 +124,11 @@ proc make_blending_history_viewer {} {
                      -xscrollcommand "$text_frame_3.text_scrl_x set" \
                      -font text_font -wrap none]
   
-  send_environment_cmd "create text-output-handler $text_box_3 $text_box_3 \
-                        (lambda (x)(declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_3 $text_box_3 dummy-env-handler nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_3 $text_box_3 dummy-env-handler nil"
+  }
 
   bind $text_box_3 <Destroy> {
     remove_handler %W
@@ -143,12 +137,9 @@ proc make_blending_history_viewer {} {
   bind $text_box_3 <1> {focus %W}
 
   
-  set text_scroll_bar_3 [scrollbar $text_frame_3.text_scrl \
-                                 -command "$text_box_3 yview"]
+  set text_scroll_bar_3 [scrollbar $text_frame_3.text_scrl -command "$text_box_3 yview"]
 
-  set text_scroll_bar_3a [scrollbar $text_frame_3.text_scrl_x \
-                                 -command "$text_box_3 xview" -orient horizontal]
-
+  set text_scroll_bar_3a [scrollbar $text_frame_3.text_scrl_x -command "$text_box_3 xview" -orient horizontal]
 
  # frame for the blending-trace display
 
@@ -159,8 +150,11 @@ proc make_blending_history_viewer {} {
                      -xscrollcommand "$text_frame_4.text_scrl_x set" \
                      -font text_font -wrap none]
   
-  send_environment_cmd "create text-output-handler $text_box_4 $text_box_4 \
-                        (lambda (x)(declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_4 $text_box_4 dummy-env-handler nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_4 $text_box_4 dummy-env-handler nil"
+  } 
 
   bind $text_box_4 <Destroy> {
     remove_handler %W
@@ -183,8 +177,11 @@ proc make_blending_history_viewer {} {
                      "$text_frame_5.text_scrl set"  \
                      -font text_font]
   
-  send_environment_cmd "create text-output-handler $text_box_5 $text_box_5 \
-                        (lambda (x)(declare (ignore x)) \"HI\") nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_5 $text_box_5 (lambda (x)(declare (ignore x)) \"HI\") nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_5 $text_box_5 (lambda (x)(declare (ignore x)) \"HI\") nil"
+  }
 
   bind $text_box_5 <Destroy> {
     remove_handler %W
@@ -192,27 +189,21 @@ proc make_blending_history_viewer {} {
   
   bind $text_box_5 <1> {focus %W}
 
-  set text_scroll_bar_5 [scrollbar $text_frame_5.text_scrl \
-                                 -command "$text_box_5 yview"]
-
-
-
-
+  set text_scroll_bar_5 [scrollbar $text_frame_5.text_scrl -command "$text_box_5 yview"]
 
   # bind the selection of a time to the updating of the chunks list, request box,
   # result box, and blending trace
 
-  bind $list_box_1 <<ListboxSelect>> "select_blend_history_time %W $list_box_2 $text_box_2 $text_box_5 $text_box_4"
+  bind $list_box_1 <<ListboxSelect>> [list select_blend_history_time %W $list_box_2 $text_box_2 $text_box_5 $text_box_4 $key]
 
   # make chunk selection call two display updaters 
   # Why those aren't together is unclear since the previous ones are all together...
 
-  bind $list_box_2 <<ListboxSelect>> "select_blend_history_chunk %W $list_box_1 $text_box_1; \
-                                      select_blend_history_trace %W $list_box_1 $text_box_3"
+  bind $list_box_2 <<ListboxSelect>> [list update_blend_history_views %W $list_box_1 $text_box_1 $text_box_3 $key]
 
 
 
-  button $win.get -text "Get History" -font button_font -command "get_blend_history_times $list_box_1"
+  button $win.get -text "Get History" -font button_font -command [list get_blend_history_times $list_box_1 $key]
     
   pack $list_scroll_bar_1 -side right -fill y 
   pack $list_box_1 -side left -expand 1 -fill both
@@ -265,16 +256,21 @@ proc make_blending_history_viewer {} {
   focus $win
 
   return $win
-  }
+}
+
+proc update_blend_history_views {self lb1 tb1 tb3 key} {
+
+  select_blend_history_chunk $self $lb1 $tb1 $key
+  select_blend_history_trace $self $lb1 $tb3 $key
 }
 
 
-proc get_blend_history_times {timelst} {
+proc get_blend_history_times {timelst key} {
 
   send_environment_cmd "update [get_handler_name $timelst] \
     (lambda (x) \
       (declare (ignore x)) \
-      (blend-history-get-time-list))"
+      (blend-history-get-time-list '$key))"
 }
 
 
@@ -288,7 +284,7 @@ proc get_blend_history_times {timelst} {
 # and moved up to the server.tcl file for general comsumption, but
 # at this point I'm not sure what that should look like yet...
 
-proc select_blend_history_chunk {chunkwin timewin target_win} {
+proc select_blend_history_chunk {chunkwin timewin target_win key} {
   if [valid_handler_name $target_win] {
     set selections [$chunkwin curselection]
     if {[llength $selections] != 0} {
@@ -302,7 +298,7 @@ proc select_blend_history_chunk {chunkwin timewin target_win} {
         send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (blend-history-chunk-display $time '$chunk))"
+                (blend-history-chunk-display \"$time\" '$chunk '$key))"
       } else {
         send_environment_cmd \
           "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
@@ -315,7 +311,7 @@ proc select_blend_history_chunk {chunkwin timewin target_win} {
 }
 
 
-proc select_blend_history_trace {chunkwin timewin target_win} {
+proc select_blend_history_trace {chunkwin timewin target_win key} {
   if [valid_handler_name $target_win] {
     set selections [$chunkwin curselection]
     if {[llength $selections] != 0} {
@@ -329,7 +325,7 @@ proc select_blend_history_trace {chunkwin timewin target_win} {
         send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (blend-history-chunk-trace-display $time '$chunk))"
+                (blend-history-chunk-trace-display \"$time\" '$chunk '$key))"
       } else {
         send_environment_cmd \
           "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
@@ -345,7 +341,7 @@ proc select_blend_history_trace {chunkwin timewin target_win} {
 # needs to update request, result, blending trace and chunks list now...
 # chunks list, request box, result box, and blending trace
 
-proc select_blend_history_time {timewin chunklist request result blend} {
+proc select_blend_history_time {timewin chunklist request result blend key} {
   if [valid_handler_name $request] {
     set selections [$timewin curselection]
     if {[llength $selections] != 0} {
@@ -354,22 +350,22 @@ proc select_blend_history_time {timewin chunklist request result blend} {
       send_environment_cmd "update [get_handler_name $chunklist] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (blend-history-chunk-list $time))"
+                (blend-history-chunk-list \"$time\" '$key))"
 
       send_environment_cmd "update [get_handler_name $request] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (blend-history-request-text $time))"
+                (blend-history-request-text \"$time\" '$key))"
 
       send_environment_cmd "update [get_handler_name $result] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (blend-history-result-display $time))"
+                (blend-history-result-display \"$time\" '$key))"
 
       send_environment_cmd "update [get_handler_name $blend] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (blend-history-trace-display $time))"
+                (blend-history-trace-display \"$time\" '$key))"
 
 
     } else {
@@ -388,11 +384,5 @@ proc select_blend_history_time {timewin chunklist request result blend} {
   }
 }
 
-# Make a button for the control panel that will open a new declarative viewer
 
-button [control_panel_name].blending_history -command {make_blending_history_viewer} \
-       -text "Blending History" -font button_font
-
-# put that button on the control panel
-
-pack [control_panel_name].blending_history
+add_history_button make_blending_history_viewer "Blendings" :save-blending-history "Blending history" right get-blending-history default-save-history-info

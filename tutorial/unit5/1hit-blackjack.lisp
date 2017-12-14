@@ -305,10 +305,8 @@
      +manual>
        cmd press-key
        key =act
-     =retrieval>
-       mc1 nil
-       action nil
-     -retrieval>)
+     
+     @retrieval>)
   
   
   (p results-should-hit

@@ -10,7 +10,7 @@
 
 global standalone_mode
 
-# Use 0 for not standalne
+# Use 0 for not standalone
 # Use 1 for Windows standalone
 # Use 2 for Mac standalone
 # Use 3 for Android app
@@ -94,7 +94,11 @@ if {$standalone_mode != 3} {cd ..}
 
 if {$standalone_mode == 0} {cd ..}
 
+if {$standalone_mode == 2} {cd ..}
+
 set top_dir [pwd]
+
+if {$standalone_mode == 2} {cd applications}
 
 if {$standalone_mode == 0} {cd "environment"}
 
@@ -800,6 +804,22 @@ proc wait_for_non_null {var} {
     tkwait var hack_ticker
   }
   # report_status "-done  "
+}
+
+
+proc wait_for_handler_ready {name} {
+
+ # report_status "waiting for $name\n"
+  global hack_ticker
+  global handler_names
+
+  set check [array names handler_names $name]
+
+  while { $check == ""} {
+    tkwait var hack_ticker
+    set check [array names handler_names $name]
+   # report_status "now it is $check"
+  }
 }
 
 set up_and_running 0

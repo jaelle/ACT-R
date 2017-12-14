@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : blending-history-tool.lisp
-;;; Version     : 1.0
+;;; Version     : 1.1
 ;;; 
 ;;; Description : Code to support a blending history tool in the environment.
 ;;; 
@@ -34,6 +34,13 @@
 ;;; 2012.02.09 Dan
 ;;;             : * Explicitly close streams made with make-string-output-stream 
 ;;;             :   to be safe.
+;;; 2016.05.03 Dan [1.1]
+;;;             : * Update the code to work with the new history tool interface
+;;;             :   that can use saved data.  Requires getting a key for every
+;;;             :   interface function, saving the text of items instead of just
+;;;             :   printing them when asked, and adding a function to get the
+;;;             :   history.
+;;;             : * Also turn on :sact and :sblt with :save-blending-history.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -41,9 +48,8 @@
 ;;; Put this file into the other-files directory and the corresponding .tcl file
 ;;; into the environment/GUI/dialogs directory to use the new tool.
 ;;;
-;;; Open the blending history window before running the model or set the
-;;; :save-blending-history parameter to t, :sact to t, and the :sblt parameter to t 
-;;; in the model to enable the recording.
+;;; Enable the Blending trace in the recorder tool or set the :save-blending-history
+;;; parameter to t in the model to enable the recording.
 ;;; 
 ;;; Once the model has run click the "Get history" button in the blending history 
 ;;; window.  
@@ -78,12 +84,15 @@
 (defstruct blend-history
   time
   request
+  trace
   chunks
+  chunk-texts
+  activation-traces
   result)
 
 (defun blend-request-recorder (request)
   (let ((history (get-module blending-history))
-        (block (make-blend-history :time (mp-time) :request request)))
+        (block (make-blend-history :time (mp-time-ms) :request (capture-model-output (pprint-chunk-spec request)))))
     (push block (blend-history-module-history history))
     nil))
 
@@ -91,6 +100,11 @@
   (let* ((history (get-module blending-history))
          (record (car (blend-history-module-history history))))
     (setf (blend-history-chunks record) set)
+    (dolist (x set)
+      (push (cons x (capture-model-output (pprint-chunks-fct (list x))))
+            (blend-history-chunk-texts record))
+      (push (cons x (capture-model-output (print-chunk-activation-trace-fct x (mp-time-ms) t)))
+            (blend-history-activation-traces record)))
     nil))
 
 (defun blend-result-recorder (result)
@@ -98,6 +112,8 @@
          (record (car (blend-history-module-history history)))
          (cmdt (car (no-output (sgp :cmdt))))
          (s (make-string-output-stream)))
+    (setf (blend-history-trace record)
+      (capture-model-output (print-blending-trace (blend-history-time record) t)))
     (if result
         (progn
           (sgp-fct (list :cmdt s))
@@ -109,45 +125,59 @@
   nil)
 
 
-(defun blend-history-chunk-display (time chunk)
-  (let* ((history (get-module blending-history))
-         (record (find time (blend-history-module-history history) :key 'blend-history-time)))
-    (pprint-chunks-fct (list chunk))))
+(defun blend-history-chunk-display (time-string chunk key)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-history-information :save-blending-history key))
+         (record (find time history :key 'blend-history-time)))
+    (aif (assoc chunk (blend-history-chunk-texts record))
+         (format t "~a" (cdr it))
+         "")))
 
-
-(defun blend-history-chunk-trace-display (time chunk)
-  (let* ((history (get-module blending-history))
-         (record (find time (blend-history-module-history history) :key 'blend-history-time)))
+(defun blend-history-chunk-trace-display (time-string chunk key)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-history-information :save-blending-history key))
+         (record (find time history :key 'blend-history-time)))
          
-    (print-chunk-activation-trace-fct chunk time)))
+    (aif (assoc chunk (blend-history-activation-traces record))
+         (format t "~a" (cdr it))
+         "")))
 
                
-(defun blend-history-chunk-list (time)
-  (let* ((history (get-module blending-history))
-         (record (find time (blend-history-module-history history) :key 'blend-history-time)))
+(defun blend-history-chunk-list (time-string key)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-history-information :save-blending-history key))
+         (record (find time history :key 'blend-history-time)))
     (blend-history-chunks record)))
 
-(defun blend-history-request-text (time)
-  (let* ((history (get-module blending-history))
-         (record (find time (blend-history-module-history history) :key 'blend-history-time)))
-    (pprint-chunk-spec (blend-history-request record))))
+(defun blend-history-request-text (time-string key)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-history-information :save-blending-history key))
+         (record (find time history :key 'blend-history-time)))
+    (format t "~a" (blend-history-request record))))
 
 
-(defun blend-history-get-time-list ()
-  (let ((history (get-module blending-history)))
-    (nreverse (mapcar 'blend-history-time (blend-history-module-history history)))))
+(defun blend-history-get-time-list (key)
+  (let ((history (get-history-information :save-blending-history key)))
+    (nreverse (mapcar (lambda (x) 
+                        (format nil "~/print-time-in-seconds/" (blend-history-time x))) 
+                history))))
 
 
-(defun blend-history-result-display (time)
-  (let* ((history (get-module blending-history))
-         (record (find time (blend-history-module-history history) :key 'blend-history-time)))
+(defun blend-history-result-display (time-string key)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-history-information :save-blending-history key))
+         (record (find time history :key 'blend-history-time)))
          
     (aif (blend-history-result record)
          (format t "~a" it)
       (format t "Blending failure"))))
 
-(defun blend-history-trace-display (time)
-  (print-blending-trace time))
+(defun blend-history-trace-display (time-string key)
+  (let* ((time (read-from-string (remove #\. time-string)))
+         (history (get-history-information :save-blending-history key))
+         (record (find time history :key 'blend-history-time)))
+  
+    (format t "~a" (blend-history-trace record))))
 
 
 (defun reset-blend-history-module (module)
@@ -166,7 +196,11 @@
                    (unless (find 'blend-set-recorder (car (sgp :blending-set-hook)))
                      (sgp :blending-set-hook blend-set-recorder))
                    (unless (find 'blend-result-recorder (car (sgp :blending-result-hook)))
-                     (sgp :blending-result-hook blend-result-recorder)))
+                     (sgp :blending-result-hook blend-result-recorder))
+                   (unless (car (sgp :sact))
+                     (sgp :sact t))
+                   (unless (car (sgp :sblt))
+                     (sgp :sblt t)))
                
                (progn
                  (when (find 'blend-request-recorder (car (sgp :blending-request-hook)))
@@ -199,10 +233,14 @@
   :creation (lambda (x) (declare (ignore x)) (make-blend-history-module))
   :reset 'reset-blend-history-module
   :params 'params-blend-history-module
-  :version "1.0"
+  :version "1.1"
   :documentation "Module to record blending history for display in the environment.")
   
 
+(defun get-blending-history ()
+  (let ((m (get-module blending-history)))
+    (when m
+      (blend-history-module-history m))))
 #|
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public

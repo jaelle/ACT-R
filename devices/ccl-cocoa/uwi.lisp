@@ -82,6 +82,12 @@
 ;;;             : Added a font-size keyword parameter to make-static-text-for-exp-window.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2016.06.08 Dan
+;;;             : * Allow the class in make-rpm-window to override visible-
+;;;             :   virtual-windows if it's a subtype of that class.
+;;; 2016.06.15 Dan
+;;;             : * Added the modify actions to support the new AGI functionality
+;;;             :   and actually modify things -- not just replace.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -235,14 +241,13 @@
                              (width 100) (height 100) (x 0 ) (y 0))
   "Make and return a window for use with the UWI"
   (if visible
-    (if (and (visible-virtuals-available?) (null class))
-      (make-instance 'visible-virtual-window :window-title title 
-                     :width width :height height :x-pos x :y-pos y)
-      (make-instance (if class class 'rpm-real-window) 
-                     :window-title title :view-size (make-point width height) 
-                     :view-position (make-point x y)))
+      (if (and (visible-virtuals-available?) (or (null class) (subtypep class 'visible-virtual-window)))
+          (make-instance (if class class 'visible-virtual-window) :window-title title :width width :height height :x-pos x :y-pos y)
+        (make-instance (if class class 'rpm-real-window) 
+          :window-title title :view-size (make-point width height) 
+          :view-position (make-point x y)))
     (make-instance (if class class 'rpm-virtual-window) :window-title title 
-                   :width width :height height :x-pos x :y-pos y)))
+      :width width :height height :x-pos x :y-pos y)))
 
 
 ;;; MAKE-BUTTON-FOR-RPM-WINDOW  [Method]
@@ -262,6 +267,59 @@
     (set-back-color item (color-symbol->system-color color))
     item))
 
+(defmethod modify-button-for-rpm-window ((button button-dialog-item) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (action nil actionp))
+  "Modify (replace) a text item for the rpm window"
+  (unless colorp 
+    (setf color  (system-color->symbol (get-back-color button))))
+ 
+  (unless textp
+    (setf text (dialog-item-text button)))
+  (unless heightp
+    (setf height (point-v (view-size button))))
+  (unless widthp
+    (setf width  (point-h (view-size button))))
+  (unless xp
+    (setf x (point-h (view-position button))))
+  (unless yp
+    (setf y (point-v (view-position button))))
+  (unless actionp
+    (setf action (dialog-item-action button)))
+
+  (let ((visible (view-window button)))
+
+    (when visible 
+      (remove-visual-items-from-rpm-window visible button))
+
+    (set-back-color button (color-symbol->system-color color))
+    
+    (set-dialog-item-text button text)
+    (set-view-position button x y)
+    (set-view-size button width height)
+ 
+
+    ;; neither of these slots seems to really matter
+    ;; only the action function call, but setting 
+    ;; everything to be safe
+
+    (when (null action)
+      (setf action (lambda (x) (declare (ignore x)))))
+
+
+    (setf (slot-value button 'dialog-item-action) action)
+
+    ;; the real action gets called with no args and needs to call our action
+    (let ((a2 (lambda () (funcall action button))))
+
+      (setf (slot-value button 'easygui::action) a2)
+    
+      (setf (easygui::action button) a2))  
+
+
+    (when visible 
+      (add-visual-items-to-rpm-window visible button)))
+  button)
+
+
 ;;; MAKE-STATIC-TEXT-FOR-RPM-WINDOW  [Method]
 ;;; Description : Build and return a static-text-dialog-item based on the
 ;;;             : parameters supplied.
@@ -278,6 +336,39 @@
                                 :view-font (list "Lucida Grande" font-size :SRCCOPY :PLAIN '(:COLOR-INDEX 0)))))
     (set-part-color item :text (color-symbol->system-color color))
     item))
+
+
+(defmethod modify-text-for-rpm-window ((text-item static-text-dialog-item) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (font-size nil font-sizep))
+  "Modify (replace) a text item for the rpm window"
+  (unless colorp 
+    (setf color  (system-color->symbol (part-color text-item :text))))
+  (unless font-sizep
+    (setf font-size (slot-value (view-font text-item) 'ns:_size)))
+  (unless textp
+    (setf text (dialog-item-text text-item)))
+  (unless heightp
+    (setf height (point-v (view-size text-item))))
+  (unless widthp
+    (setf width  (point-h (view-size text-item))))
+  (unless xp
+    (setf x (point-h (view-position text-item))))
+  (unless yp
+    (setf y (point-v (view-position text-item))))
+  
+  (let ((visible (view-window text-item)))
+
+    (when visible 
+      (remove-visual-items-from-rpm-window visible text-item))
+
+    (set-part-color text-item :text (color-symbol->system-color color))
+    (setf (slot-value (view-font text-item) 'ns:_size) (coerce font-size 'double-float))
+    (set-dialog-item-text text-item text)
+    (set-view-position text-item x y)
+    (set-view-size text-item width height)
+
+    (when visible 
+      (add-visual-items-to-rpm-window visible text-item)))
+  text-item)
 
 
 ;;; MAKE-LINE-FOR-RPM-WINDOW  [Method]
@@ -306,6 +397,49 @@
                        :position vp
                        :size vs
                        :color (color-symbol->system-color color))))))
+
+
+
+(defmethod modify-line-for-rpm-window ((line liner) start-pt end-pt &key (color nil colorp))
+  "Modify a line item for the rpm window"
+  (unless colorp 
+    (setf color (system-color->symbol (color line))))
+  (let* ((p1 (view-position line))
+         (x1 (point-h p1))
+         (y1 (point-v p1))
+         (p2 (view-size line))
+         (x2 (point-h p2))
+         (y2 (point-v p2))
+         (sx (if start-pt (first start-pt) x1))
+         (ex (if end-pt (first end-pt) (1- (+ x1 x2))))
+         (sy (if start-pt 
+                 (second start-pt)
+                 (if (eq (liner-type line) 'td) 
+                     y1
+                     (1- (+ y1 y2)))))
+         (ey (if end-pt
+                 (second end-pt)
+                 (if (eq (liner-type line) 'td)
+                     (1- (+ y1 y2))
+                     y1))))
+    
+    (unless (> ex sx)
+      (rotatef sx ex)
+      (rotatef sy ey))
+    (let ((visible (view-window line)))
+
+      (when visible 
+        (remove-visual-items-from-rpm-window visible line))
+
+      (set-view-position line sx (min sy ey))
+      (set-view-size line (+ 1 (abs (- ex sx))) (+ 1 (abs (- ey sy))))
+      (setf (slot-value line 'liner-type) (if (> ey sy) 'td 'bu))
+      (set-fore-color line (color-symbol->system-color color))
+      
+      (when visible 
+        (add-visual-items-to-rpm-window visible line)))
+    line))
+
 
 ;;; ALLOW-EVENT-MANAGER  [Method]
 ;;; Description : Call event-dispatch.  This is used while waiting for

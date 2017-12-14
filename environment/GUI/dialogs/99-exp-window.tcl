@@ -29,14 +29,6 @@ proc send_keypress_to_actr {win key} {
                           (list 'ignore))"
   }
 
-proc send_button_press_to_actr {win but} {
-  send_environment_cmd "update [get_handler_name .env_window] \
-                        (lambda (x) \
-                          (declare (ignore x)) \
-                          (env-button-pressed \"$win\" \"$but\") \
-                               (list 'ignore))"
-  }
-
 
 proc send_click_to_actr {win x y} {
   send_environment_cmd "update [get_handler_name .env_window] \
@@ -46,23 +38,6 @@ proc send_click_to_actr {win x y} {
                                (list 'ignore))"
   }
 
-
-proc maybe_send_click_to_actr {w win x y} {
-  global suppress_button_clicks
-  if {[lsearch -exact $suppress_button_clicks $w] == -1} {
-    send_click_to_actr $win $x $y
-  }
-}
-
-
-proc restore_suppressed_button {but old} {
-  global suppress_button_clicks
-
-  event generate $but <ButtonRelease> -button 1
-  set index [lsearch -exact $suppress_button_clicks $but]
-  set suppress_button_clicks [lreplace $suppress_button_clicks $index $index]
-  $but configure -command $old
-}
 
 
 proc create_env_window {win title width height x y} {
@@ -86,27 +61,52 @@ proc create_env_window {win title width height x y} {
   canvas $win.can
   place $win.can -x 0 -y 0 -relwidth 1.0 -relheight 1.0
 
-  bind $win <1> "maybe_send_click_to_actr %W $win %x %y"
+  # Send all mouse clicks now too
+
+  bind $win <Button-1> "send_click_to_actr $win %x %y"
 
   wm deiconify $win
   focus -force $win
 }
 
-
-
  
+proc lighten_color {w c degree} {
+ set max [lindex [winfo rgb $w white] 0]
+ set offset [expr ($max + 1) / $degree]
+ set size [string length [format "%x" $max]]                 
+ set clist [winfo rgb $w $c]
+ set c1 [lindex $clist 0]
+ set c2 [lindex $clist 1]
+ set c3 [lindex $clist 2]
+ return [format "\#%0*X%0*X%0*X" \
+                $size [expr ($c1 + $offset) < $max ? $c1 + $offset : $max] \
+                $size [expr ($c2 + $offset) < $max ? $c2 + $offset : $max] \
+                $size [expr ($c3 + $offset) < $max ? $c3 + $offset : $max]]
+}
+
+proc flip_button_view {win box_down box_up down up} {
+  # assume that if one of the tagged items still exists
+  # that they all do since it's single threaded
+
+  set check [$win.can find withtag $box_up]
+ 
+  if {$check != ""} {
+
+      $win.can raise "$box_up" "$box_down"
+      $win.can raise "$up" "$box_up"
+      $win.can lower "$down" "$box_up"
+  }
+}
 
 
 global id_references
 global button_references
-global suppress_button_clicks
 
 
 set cursor_id ""
 set attention_id ""
 set eyeloc_id ""
 
-set suppress_button_clicks [list ]
 
 proc process_env_window {dummy cmd} {
   global id_references
@@ -114,7 +114,7 @@ proc process_env_window {dummy cmd} {
   global attention_id
   global eyeloc_id
   global button_references
-  global suppress_button_clicks
+  global options_array
 
   set win ".[lindex $cmd 1]"
  
@@ -144,7 +144,7 @@ proc process_env_window {dummy cmd} {
       $win.can delete "[lindex $cmd 4]-attention"
       set x [lindex $cmd 2]
       set y [lindex $cmd 3]
-      $win.can create oval [expr $x - 10] [expr $y - 10] [expr $x + 10] [expr $y + 10] -outline red -width 4 -tag "[lindex $cmd 4]-attention"
+      $win.can create oval [expr $x - 10] [expr $y - 10] [expr $x + 10] [expr $y + 10] -outline [lindex $cmd 5] -width 4 -tags [list "[lindex $cmd 4]-attention" attention]
     }
 
     clearattention {
@@ -155,7 +155,7 @@ proc process_env_window {dummy cmd} {
       $win.can delete "[lindex $cmd 4]-eyeloc"
       set x [lindex $cmd 2]
       set y [lindex $cmd 3]
-      $win.can create oval [expr $x - 5] [expr $y - 5] [expr $x + 5] [expr $y + 5] -outline blue -width 3 -tag "[lindex $cmd 4]-eyeloc"
+      $win.can create oval [expr $x - 5] [expr $y - 5] [expr $x + 5] [expr $y + 5] -outline blue -width 3 -tags [list "[lindex $cmd 4]-eyeloc" eyeloc]
     }
 
     cleareyeloc {
@@ -183,24 +183,86 @@ proc process_env_window {dummy cmd} {
                               -text [lindex $cmd 6] -anchor nw -tags [list [lindex $cmd 2] text]
     }
     button {
-      set but \
-       [button [new_variable_name $win.can.but] -text [lindex $cmd 7] -bg [lindex $cmd 8] -font button_font\
-               -command "send_button_press_to_actr $win [lindex $cmd 2]"]
+   # NOT actually making that an option, but keeping the code for reference!
+   #  if {$options_array(real_buttons) == 1} {
+   #    set but \
+   #      [button [new_variable_name $win.can.but] -text [lindex $cmd 7] -bg [lindex $cmd 8] -font button_font\
+   #              -command "send_button_press_to_actr $win [lindex $cmd 2]"]
 
-      $win.can create window [lindex $cmd 3] [lindex $cmd 4] \
-                                -window $but -anchor nw \
-                                -height [lindex $cmd 6] -width [lindex $cmd 5] -tags [list [lindex $cmd 2] button]
+   #     $win.can create window [lindex $cmd 3] [lindex $cmd 4] \
+   #                               -window $but -anchor nw \
+   #                               -height [lindex $cmd 6] -width [lindex $cmd 5] -tags [list [lindex $cmd 2] button]
+   #  } else {
+
+      set x1 [lindex $cmd 3]
+      set y1 [lindex $cmd 4]
+      set x2 [expr $x1 + [lindex $cmd 5]]
+      set y2 [expr $y1 + [lindex $cmd 6]]
+      set base_color [lindex $cmd 8]
+      set name [lindex $cmd 2]                                                                                                     
+
+      $win.can create rectangle $x1 $y1 $x2 $y2 \
+                                -fill $base_color -outline white -width 1 -tags [list $name button "$name-box-up"]
+
+      $win.can create rectangle $x1 $y1 $x2 $y2 \
+                                -fill [lighten_color $win.can $base_color 2] -outline black -width 1 -tags [list $name button "$name-box-down"]
+                                                                                                     
+
+      $win.can create text [expr $x1 + round([lindex $cmd 5] / 2)] [expr $y1 + round([lindex $cmd 6] / 2)] \
+                           -font button_font -fill black -text [lindex $cmd 7] -anchor center -tags [list $name button "$name-up"]
+
+      $win.can create text [expr $x1 + round([lindex $cmd 5] / 2) + 1] [expr $y1 + round([lindex $cmd 6] / 2) + 1] \
+                           -font button_font -fill black -text [lindex $cmd 7] -anchor center -tags [list $name button "$name-down"]
+
+
+
+      $win.can create line $x2 $y1 $x2 $y2 -width 1 -fill black -tags [list $name button "$name-up"]
+      $win.can create line $x2 $y2 $x1 $y2 -width 1 -fill black -tags [list $name button "$name-up"]
+      $win.can create line $x2 $y1 $x2 $y2 -width 1 -fill white -tags [list $name button "$name-down"]
+      $win.can create line $x2 $y2 $x1 $y2 -width 1 -fill white -tags [list $name button "$name-down"]
+
+      $win.can create line [expr $x1 + 1] [expr $y1 + 1] [expr $x1 + 1] [expr $y2 - 1] -width 1 -fill darkgray -tags [list $name button "$name-down"]
+      $win.can create line [expr $x1 + 1] [expr $y1 + 1] [expr $x2 - 1] [expr $y1 + 1] -width 1 -fill darkgray -tags [list $name button "$name-down"]
+      $win.can create line [expr $x2 - 1] [expr $y1 + 1] [expr $x2 - 1] [expr $y2 - 1] -width 1 -fill darkgray -tags [list $name button "$name-up"]
+      $win.can create line [expr $x2 - 1] [expr $y2 - 1] [expr $x1 + 1] [expr $y2 - 1] -width 1 -fill darkgray -tags [list $name button "$name-up"]
+
+      # set things in the "up" position
+
+      $win.can raise "$name-box-up" "$name-box-down"
+      $win.can raise "$name-up" "$name-box-up"
+      $win.can lower "$name-down" "$name-box-up"
+   
+   #  }
     }
     click {
+     # if {$options_array(real_buttons) == 1} {
+     # 
+     #   set but [$win.can itemcget [$win.can find withtag [lindex $cmd 2]] -window]
+     #   set old "[$but cget -command]"
+     # 
+     #   $but configure -command ""
+     #   lappend suppress_button_clicks $but
+     #
+     #   event generate $but <ButtonPress> -button 1
+     #   after 100 "restore_suppressed_button $but [list $old]"
+     # } else {
       
-      set but [$win.can itemcget [$win.can find withtag [lindex $cmd 2]] -window]
-      set old "[$but cget -command]"
-      
-      $but configure -command ""
-      lappend suppress_button_clicks $but
+     set name [lindex $cmd 2]
 
-      event generate $but <ButtonPress> -button 1
-      after 100 "restore_suppressed_button $but [list $old]"
+      # set things in the down position
+
+      $win.can raise "$name-box-down" "$name-box-up"
+      $win.can raise "$name-down" "$name-box-down"
+      $win.can lower "$name-up" "$name-box-down"
+
+      after 100 "flip_button_view $win \"$name-box-down\" \"$name-box-up\" \"$name-down\" \"$name-up\""
+     # }
     }
   }
+
+  # make sure these show over everything
+
+  $win.can raise cursor all
+  $win.can raise eyeloc all
+  $win.can raise attention all
 }

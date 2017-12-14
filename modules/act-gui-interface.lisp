@@ -144,6 +144,22 @@
 ;;;             : * Time to remove the a1 from the version.
 ;;; 2015.05.26 Dan
 ;;;             : * Added a :font-size parameter to add-text-to-exp-window.
+;;; 2016.06.07 Dan [3.0]
+;;;             : * Starting work to add create and modify actions for each of 
+;;;             :   default item types.  Create is already supported by the UWI, 
+;;;             :   and is being implemented first.
+;;;             : * Added a check of the text for a button to make sure it's a
+;;;             :   string.
+;;; 2016.06.08 Dan
+;;;             : * Adding a :class parameter to open-exp-window for passing off
+;;;             :   to make-rpm-window to allow for easier extensions while I'm
+;;;             :   in here.
+;;;             : * Added the front AGI modify functions which call out to UWI
+;;;             :   modify functions.
+;;; 2016.06.09 Dan
+;;;             : * Fixed a bug with the use of flatten and push.
+;;;             : * Fixed an issue with create-line actually adding it to the 
+;;;             :   display as well.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -258,7 +274,7 @@
 ;;;             : upon the window to be executed within that model's context, but
 ;;;             : that could be tricky and may not really be necessary.
 
-(defun open-exp-window (title &key (width 300) (height 300) (visible t) (x 300) (y 300))
+(defun open-exp-window (title &key (width 300) (height 300) (visible t) (x 300) (y 300) class)
   "Open an experiment window"
   (if (or (stringp title) (symbolp title))
       (if (current-model)
@@ -278,11 +294,17 @@
                 (remhash (cdr exists) (global-agi-table instance))
                 (setf win nil)))
             (unless win
-              (setf win (make-rpm-window :visible visible :title (format nil "~a (~a)" title (current-model))
+              (when class
+                (unless (subtypep class 'rpm-window) 
+                  (print-warning "Class for open-exp-window must be a subtype of rpm-window, but given ~s.  Using default class." class)
+                  (setf class nil)))
+              (setf win (make-rpm-window :visible visible 
+                                         :title (format nil "~a (~a)" title (current-model))
                                          :width width 
                                          :height height
                                          :x x
-                                         :y y))
+                                         :y y
+                                         :class class))
               (push (cons title win) (agi-window-list instance))
               (setf (gethash win (global-agi-table instance)) (cons (current-meta-process) (current-model))))
             (select-rpm-window win)
@@ -483,7 +505,63 @@
              (add-visual-items-to-rpm-window it item)
              item)
            (print-warning "No window available for adding a text item."))
-    (print-warning "Text must be a string in add-text-to-exp-window cannot add ~s." text)))
+    (print-warning "Text must be a string in add-text-to-exp-window. Cannot add ~s." text)))
+
+
+(defun create-text-for-exp-window (&key (x 0) (y 0) (text "") (height 20) (width 75) (color 'black) (window nil) (font-size 12))
+  "Creates a text item for the experiment window"
+  (if (stringp text)
+      (aif (determine-exp-window window)
+           (let ((item (make-static-text-for-rpm-window it
+                                                        :text text 
+                                                        :x x
+                                                        :y y
+                                                        :width width
+                                                        :height height
+                                                        :color color
+                                                        :font-size font-size)))
+             item)
+           (print-warning "No window available for creating a text item."))
+    (print-warning "Text must be a string in create-text-for-exp-window. Cannot create with ~s." text)))
+
+(defun modify-text-for-exp-window (item &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (font-size nil font-sizep))
+  "Modify a text item for the experiment window"
+  (if item
+      (let (mods)
+        (when xp
+          (if (numberp x)
+              (push (list :x x) mods)
+            (print-warning "X parameter in modify-text-for-exp-window must be a number but given ~s." x)))
+        (when yp
+          (if (numberp y)
+              (push (list :y y) mods)
+            (print-warning "y parameter in modify-text-for-exp-window must be a number but given ~s." y)))
+        (when textp
+          (if (stringp text)
+              (push (list :text text) mods)
+            (print-warning "Text parameter in modify-text-for-exp-window must be a string but given ~s." text)))
+        (when heightp
+          (if (numberp height)
+              (push (list :height height) mods)
+            (print-warning "Height parameter in modify-text-for-exp-window must be a number but given ~s." height)))
+        (when widthp
+          (if (numberp width)
+              (push (list :width width) mods)
+            (print-warning "Width parameter in modify-text-for-exp-window must be a number but given ~s." width)))
+        (when font-sizep
+          (if (numberp font-size)
+              (push (list :font-size font-size) mods)
+            (print-warning "Font-size parameter in modify-text-for-exp-window must be a number but given ~s." font-size)))
+        (when colorp ;; consider anything valid for color
+          (push (list :color color) mods))
+        
+        (if mods
+            (progn
+              (setf mods (flatten mods))
+              (apply 'modify-text-for-rpm-window (push item mods)))
+          item))
+    (print-warning "An item is required for modify-text-for-exp-window but nil was given.")))
+
 
 ;;; ADD-BUTTON-TO-EXP-WINDOW  [Function]
 ;;; Description : Build a button item based on the parameters supplied and
@@ -492,17 +570,74 @@
 
 (defun add-button-to-exp-window (&key (x 0) (y 0) (text "Ok") (action nil) (height 18) (width 60) (color 'gray) (window nil))
   "Create and display a button item in the experiment window"
-  (aif (determine-exp-window window)
-       (let ((item (make-button-for-rpm-window it
-                                               :x x
-                                               :y y
-                                               :text text
-                                               :action action
-                                               :height height
-                                               :width width :color color)))
-         (add-visual-items-to-rpm-window it item)
-         item)
-       (print-warning "No window available for adding a button.")))
+  (if (stringp text)
+      (aif (determine-exp-window window)
+           (let ((item (make-button-for-rpm-window it
+                                                   :x x
+                                                   :y y
+                                                   :text text
+                                                   :action action
+                                                   :height height
+                                                   :width width :color color)))
+             (add-visual-items-to-rpm-window it item)
+             item)
+           (print-warning "No window available for adding a button."))
+    (print-warning "Text must be a string in add-button-to-exp-window. Cannot add ~s." text)))
+
+(defun create-button-for-exp-window (&key (x 0) (y 0) (text "Ok") (action nil) (height 18) (width 60) (color 'gray) (window nil))
+  "Creates a button item for the experiment window"
+  (if (stringp text)
+      (aif (determine-exp-window window)
+           (let ((item (make-button-for-rpm-window it
+                                                   :x x
+                                                   :y y
+                                                   :text text
+                                                   :action action
+                                                   :height height
+                                                   :width width :color color)))
+             item)
+           (print-warning "No window available for creating a button."))
+    (print-warning "Text must be a string in create-button-for-exp-window. Cannot create with ~s." text)))
+
+(defun modify-button-for-exp-window (item &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (action nil actionp))
+  "Modify a text item for the experiment window"
+  (if item
+      (let (mods)
+        (when xp
+          (if (numberp x)
+              (push (list :x x) mods)
+            (print-warning "X parameter in modify-button-for-exp-window must be a number but given ~s." x)))
+        (when yp
+          (if (numberp y)
+              (push (list :y y) mods)
+            (print-warning "y parameter in modify-button-for-exp-window must be a number but given ~s." y)))
+        (when textp
+          (if (stringp text)
+              (push (list :text text) mods)
+            (print-warning "Text parameter in modify-button-for-exp-window must be a string but given ~s." text)))
+        (when heightp
+          (if (numberp height)
+              (push (list :height height) mods)
+            (print-warning "Height parameter in modify-button-for-exp-window must be a number but given ~s." height)))
+        (when widthp
+          (if (numberp width)
+              (push (list :width width) mods)
+            (print-warning "Width parameter in modify-button-for-exp-window must be a number but given ~s." width)))
+        (when actionp
+          (if (fctornil action)
+              (push (list :action action) mods)
+            (print-warning "Action parameter in modify-button-for-exp-window must be a function or nil but given ~s." action)))
+        (when colorp ;; consider anything valid for color
+          (push (list :color color) mods))
+        
+        (if mods
+            (progn
+              (setf mods (flatten mods))
+              (apply 'modify-button-for-rpm-window (push item mods)))
+          item))
+    (print-warning "An item is required for modify-button-for-exp-window but nil was given.")))
+
+
 
 ;;; ADD-LINE-TO-EXP-WINDOW  [Function]
 ;;; Description : Build a line item based on the parameters supplied and
@@ -516,6 +651,27 @@
          (add-visual-items-to-rpm-window it item)
          item)
        (print-warning "No window available for adding a line.")))
+
+(defun create-line-for-exp-window (start-pt end-pt &key (color 'black) (window nil))
+  "Creates a line item for the experiment window"
+  (aif (determine-exp-window window)
+       (let ((item (make-line-for-rpm-window it (mapcar 'round start-pt) (mapcar 'round end-pt) color)))
+         item)
+       (print-warning "No window available for adding a line.")))
+
+(defun modify-line-for-exp-window (item start-pt end-pt &key (color nil colorp))
+  "Modify a text item for the experiment window"
+  (if item
+      (progn
+        (when (or (and start-pt (not end-pt)) (and (not start-pt) end-pt))
+          (print-warning "Both end points must be provided when modifying a line's position with modify-line-for-exp-window but ~s was nil."
+                         (if start-pt 'end-pt 'start-pt))
+          (setf start-pt nil end-pt nil))
+        
+        (if colorp
+            (modify-line-for-rpm-window item (mapcar 'round start-pt) (mapcar 'round end-pt) :color color)
+          (modify-line-for-rpm-window item (mapcar 'round start-pt) (mapcar 'round end-pt))))
+    (print-warning "An item is required for modify-line-for-exp-window but nil was given.")))
 
 
 ;;;; ---------------------------------------------------------------------- ;;;;

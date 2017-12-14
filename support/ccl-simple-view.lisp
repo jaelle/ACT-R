@@ -161,6 +161,12 @@
 ;;; 2015.11.18 Dan Bothell
 ;;;             : Removed a spurious - which was accidentally added with the last
 ;;;             : update, but didn't break anything.
+;;; 2016.06.16 Dan Bothell
+;;;            : Changed rgb->color-symbol because there are more pairs in the list than
+;;;            : just gray and grey.  Always returns the same result each time for each of
+;;;            : the current 8 pairs but any new pairs may return mixed results unless
+;;;            : additional changes are made to rgb->color-symbol (or some other fix is
+;;;            : implemented, like another table preferences).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; ----------------------------------------------------------------------
 ; Begin file: build/pre-code.lisp
@@ -1312,9 +1318,28 @@
     (ecase (length res-symb)
       (0 nil)
       (1 (first res-symb))
-      (2 (progn
+      (2 #| This doesn't work because there are other pairs
+            in the color table:  pink&rosybrown, navyblue&navy,aqua&cyan,lightgray$light-gray,lightblue&light-blue,magenta&fuchsia,darkgreen&dark-green
+           (progn
            (guard ((null (set-difference (list 'gray 'grey) res-symb))))
-           'gray)))))
+           'gray)))))|#
+       (cond ((find 'gray res-symb)
+              'gray)
+             ((find 'pink res-symb)
+              'pink)
+             ((find 'navy res-symb)
+              'navy)
+             ((find 'cyan res-symb)
+              'cyan)
+             ((find 'light-gray res-symb)
+              'light-gray)
+             ((find 'light-blue res-symb)
+              'light-blue)
+             ((find 'magenta res-symb)
+              'magenta)
+             ((find 'dark-green res-symb)
+              'dark-green)
+             (t (first res-symb)))))))
 
 (defun color-symbol->system-color (symb)
   (destructuring-bind (red green blue) (color-symbol->rgb symb)

@@ -19,7 +19,7 @@
 ;;; 
 ;;; Bugs        : 
 ;;;
-;;; To do       : [ ] Consider converting the internal time over to milliseconds
+;;; To do       : [x] Consider converting the internal time over to milliseconds
 ;;;             :     by using buffer-record-ms-time instead of -time-stamp.
 ;;;             :     The down side of that is the display for the environment
 ;;;             :     should probably still be in seconds.
@@ -49,16 +49,33 @@
 ;;; 2015.06.09 Dan
 ;;;             : * Record time in ms internally, but still show seconds to the
 ;;;             :   user in the list.
+;;; 2016.04.22 Dan
+;;;             : * Start of the upgrade to allow saving history info so that it
+;;;             :   can be reloaded for the environment tools.
+;;; 2016.04.27 Dan
+;;;             : * Modify the environment interface functions so that they use
+;;;             :   the indicated underlying data.
+;;; 2016.05.04 Dan
+;;;             : * Just some minor code clean-up in the param function.
+;;; 2016.05.06 Dan
+;;;             : * Fixed an issue with buffers that were cleared and then set
+;;;             :   at the same time -- before the end state showed as empty.
+;;;             : * Also marked the to do as complete since that happened with
+;;;             :   the 2015.06.09 update.
+;;; 2016.05.16 Dan
+;;;             : * Previous fix actually broke the chunk recording so this now
+;;;             :   gets it right.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
-;;; Open the buffer history window before running the model or set the
-;;; :save-buffer-history parameter to t in the model to enable the recording.
+;;; Set the :save-buffer-history parameter to t in the model or select the "Buffer
+;;; History" option in the data to record using the Environment.
 ;;; 
 ;;; Once the model has run click the "Get history" button in the buffer history 
 ;;; window.  Only those buffers specified with the :traced-buffers parameter
-;;; of the buffer-trace module will have thier history recorded.
+;;; of the buffer-trace module (or those selected in the Environment recorder) 
+;;; will have thier history recorded.
 ;;; 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -111,48 +128,44 @@
       (dolist (summary (buffer-record-buffers summaries))
         (let* ((name (buffer-summary-name summary))
                (record (make-buffer-history :time time
-                                            :chunk (when (and (not (buffer-summary-cleared summary)) (buffer-read name))
+                                            :chunk (when (buffer-read name)
                                                      (capture-model-output (buffer-chunk-fct (list name))))
                                             :status (capture-model-output (buffer-status-fct (list name))))))
           (unless (equal-history-samples record (car (gethash name (buffer-history-module-table history))))
             (push record (gethash name (buffer-history-module-table history)))))))))
 
                
-(defun buffer-history-buffer-list ()
-  (let ((history (get-module buffer-history)))
-    (hash-table-keys (buffer-history-module-table history))))
+(defun buffer-history-buffer-list (key)
+  (let ((data (get-history-information :save-buffer-history key)))
+    (sort (mapcar 'first data) #'string< :key 'symbol-name)))
 
-(defun buffer-history-text (time-string buffer)
+(defun buffer-history-text (time-string buffer key)
   (if (and (> (length time-string) 1) buffer)
-      (let ((history (get-module buffer-history)))
-        (when history 
-          (let* ((time (read-from-string (remove #\. time-string)))
-                 (record (find-if (lambda (x) 
-                                    (<= (buffer-history-time x) time))
-                                  (gethash buffer (buffer-history-module-table history))))
-                 
-                 (chunk (when record (buffer-history-chunk record)))
-                 (status (when record (buffer-history-status record))))
+      (let* ((data (get-history-information :save-buffer-history key))
+             (time (read-from-string (remove #\. time-string)))
+             (record (find-if (lambda (x) 
+                                (<= (buffer-history-time x) time))
+                              (second (assoc buffer data))))
+             (chunk (when record (buffer-history-chunk record)))
+             (status (when record (buffer-history-status record))))
             
-            (concatenate 'string (cond ((and status (stringp status))
-                                        status)
-                                       (t "No buffer status information available"))
-              
-              (string #\newline)
-              (cond ((stringp chunk) 
-                     chunk)
-                    (t (format nil "buffer empty~%")))))))
+        (concatenate 'string 
+          (cond ((and status (stringp status))
+                 status)
+                (t "No buffer status information available"))
+          (string #\newline)
+          (cond ((stringp chunk) 
+                 chunk)
+                (t (format nil "buffer empty~%")))))
     ""))
 
-(defun buffer-history-time-list ()
-  (let ((history (get-module buffer-history)))
-    (when history
-      (let ((times nil))
-        (maphash (lambda (key value)
-                   (declare (ignore key))
-                   (setf times (append (mapcar 'buffer-history-time value) times)))
-                 (buffer-history-module-table history))
-        (mapcar (lambda (x) (format nil "~/print-time-in-seconds/" x)) (sort (remove-duplicates times) #'<))))))
+(defun buffer-history-time-list (key)
+  (let ((data (get-history-information :save-buffer-history key)))
+    (let ((times nil))
+      (dolist (buffer data)
+        (dolist (history (second buffer))
+          (pushnew (buffer-history-time history) times :test '=)))
+      (mapcar (lambda (x) (format nil "~/print-time-in-seconds/" x)) (sort times #'<)))))
 
 
 (defun reset-buffer-history-module (module)
@@ -163,23 +176,21 @@
   (if (consp param)
       (case (car param)
         (:save-buffer-history 
-          (no-output
-           (progn
-             (if (cdr param)
-                 (progn
-                   (sgp :save-buffer-trace t)
-                   (unless (find 'buffer-history-recorder (car (sgp :buffer-trace-hook)))
-                     (sgp :buffer-trace-hook buffer-history-recorder)))
-               
+          (no-output 
+           (if (cdr param)
                (progn
-                 (when (find 'buffer-history-recorder (car (sgp :buffer-trace-hook)))
-                   (let ((old-hooks (car (sgp :buffer-trace-hook))))
-                     (sgp :buffer-trace-hook nil)
-                     (dolist (x old-hooks)
-                       (unless (eq x 'buffer-history-recorder)
-                         (sgp-fct (list :buffer-trace-hook x))))))))
-          
-             (setf (buffer-history-module-enabled instance) (cdr param))))))
+                 (sgp :save-buffer-trace t)
+                 (unless (find 'buffer-history-recorder (car (sgp :buffer-trace-hook)))
+                   (sgp :buffer-trace-hook buffer-history-recorder)))
+             (progn
+               (when (find 'buffer-history-recorder (car (sgp :buffer-trace-hook)))
+                 (let ((old-hooks (car (sgp :buffer-trace-hook))))
+                   (sgp :buffer-trace-hook nil)
+                   (dolist (x old-hooks)
+                     (unless (eq x 'buffer-history-recorder)
+                       (sgp-fct (list :buffer-trace-hook x)))))))))
+           
+           (setf (buffer-history-module-enabled instance) (cdr param))))
     (case param
       (:save-buffer-history (buffer-history-module-enabled instance)))))
 
@@ -193,6 +204,15 @@
   :version "1.0"
   :documentation "Module to record buffer change history for display in the environment.")
   
+
+(defun get-buffer-history-data ()
+  (let ((m (get-module buffer-history)))
+    (when m
+      (let ((r nil))
+        (maphash (lambda (buffer data)
+                   (push (list buffer data) r))
+                 (buffer-history-module-table m))
+        r))))
 
 #|
 This library is free software; you can redistribute it and/or

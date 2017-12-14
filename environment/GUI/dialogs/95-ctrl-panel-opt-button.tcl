@@ -89,6 +89,11 @@ proc select_options {} {
                 -variable current_options(kill_model_windows) \
                 -onvalue 1 -offvalue 0
 
+    checkbutton .options.stepper_null_warning \
+                -text "Show warning when opening stepper if :v is nil in all models" \
+                -font checkbox_font \
+                -variable current_options(stepper_v_nil) \
+                -onvalue 1 -offvalue 0
 
     pack .options.use_env_window -anchor w -expand 1 -fill x
     pack .options.use_smart_load -anchor w -expand 1 -fill x
@@ -97,6 +102,8 @@ proc select_options {} {
     pack .options.save_backups -anchor w -expand 1 -fill x
     pack .options.multiple_models -anchor w -expand 1 -fill x
     pack .options.multiple_models_close -anchor w -expand 1 -fill x
+    pack .options.stepper_null_warning -anchor w -expand 1 -fill x
+
 
     pack .options.but_frame
 

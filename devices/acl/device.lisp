@@ -142,6 +142,9 @@
 ;;; 2015.05.20 Dan
 ;;;             : * The approach-width call in the buttons build-vis-locs-for
 ;;;             :   method needs to pass the vision module in too.
+;;; 2016.06.16 Dan
+;;;             : * When a button has a single text item make sure that the
+;;;             :   oval and text features have the same location.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -305,19 +308,22 @@
                                 (round (- btn-height (* lines
                                                         (+ ascent descent))) 2)))
                     (width-fct #'(lambda (str) (string-width str self))))
-               (build-string-feats vis-mod :text text
-                                   :start-x 
-                                   (+ (cg:box-left (cg:box self))
-                                      (round btn-width 2))
-                                   :x-fct (lambda (string startx obj)
-                                            (declare (ignore obj))
-                                            (- startx
-                                               (round (funcall width-fct string) 2)))
-                                   :y-pos (+ start-y (round (+ ascent descent) 2))
-                                   :width-fct width-fct 
-                                   :height (min ascent btn-height) 
-                                   :obj self
-                                   :line-height (+ ascent descent)))))))
+               (let ((text-feats (build-string-feats vis-mod :text text
+                                                     :start-x 
+                                                     (+ (cg:box-left (cg:box self))
+                                                        (round btn-width 2))
+                                                     :x-fct (lambda (string startx obj)
+                                                              (declare (ignore obj))
+                                                              (- startx
+                                                                 (round (funcall width-fct string) 2)))
+                                                     :y-pos (+ start-y (round (+ ascent descent) 2))
+                                                     :width-fct width-fct 
+                                                     :height (min ascent btn-height) 
+                                                     :obj self
+                                                     :line-height (+ ascent descent))))
+                 (when (= 1 (length text-feats))
+                   (mod-chunk-fct (first text-feats) (list 'screen-x (px (view-loc self)) 'screen-y (py (view-loc self)))))
+                 text-feats))))))
     
     (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y vis-mod))))
       (dolist (x (cdr feats))

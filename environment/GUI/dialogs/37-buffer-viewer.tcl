@@ -170,7 +170,7 @@ proc select_buffer {listwin target_win model_name} {
 # Make a button for the control panel that will open a new declarative viewer
 
 button [control_panel_name].buffer -command {make_buffer_viewer} \
-                    -text "Buffer viewer" -font button_font
+                    -text "Buffer Contents" -font button_font
 
 # put that button on the control panel
 

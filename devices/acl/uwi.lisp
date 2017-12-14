@@ -78,6 +78,13 @@
 ;;;             :   returns.
 ;;; 2015.05.26 Dan
 ;;;             : * Added a font-size parameter to make-static-text-for-rpm-window.
+;;; 2016.06.08 Dan
+;;;             : * Allow the class in make-rpm-window to override visible-
+;;;             :   virtual-windows if it's a subtype of that class.
+;;; 2016.06.09 Dan
+;;;             : * Added the modify-item methods for text, buttons, and lines.
+;;; 2016.06.16 Dan
+;;;             : * Fixed the classes used for the modify methods.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -192,6 +199,24 @@
       :top y
       :foreground-color (color-symbol->system-color color)))
 
+(defmethod modify-button-for-rpm-window ((button-item cg:button) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (action nil actionp))
+  "Modify a button item for the rpm window"
+  (when xp
+    (setf (left button-item) x))
+  (when yp
+    (setf (top button-item) y))
+  (when textp
+    (setf (title button-item) text))
+  (when heightp
+    (setf (height button-item) height))
+  (when widthp
+    (setf (width button-item) width))
+  (when colorp 
+    (setf (foreground-color button-item) (color-symbol->system-color color)))
+  (when actionp
+    (setf (on-click button-item) #'(lambda (window button) (declare (ignore window)) (when action (funcall action button)))))
+  button-item)
+
 ;;; Windows
 
 (defmethod make-static-text-for-rpm-window ((win rpm-real-window) &key (x 0) (y 0) (text "") (height 20) (width 20) (color 'black) font-size)
@@ -206,6 +231,25 @@
     :foreground-color (color-symbol->system-color color)
     :on-click #'(lambda (x y) (declare (ignore x y)) (mouse-left-down win nil nil))
     :font (make-font-ex :modern "courier new" (points-to-pixels font-size))))
+
+
+(defmethod modify-text-for-rpm-window ((text-item cg:static-text) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (font-size nil font-sizep))
+  "Modify a text item for the rpm window"
+  (when xp
+    (setf (left text-item) x))
+  (when yp
+    (setf (top text-item) y))
+  (when textp
+    (setf (value text-item) text))
+  (when heightp
+    (setf (height text-item) height))
+  (when widthp
+    (setf (width text-item) width))
+  (when font-sizep
+    (setf (font text-item) (make-font-ex :modern "courier new" (points-to-pixels font-size))))
+  (when colorp 
+    (setf (foreground-color text-item) (color-symbol->system-color color)))
+  text-item)
 
 
 ;;; It turns out that due to the bottom up nature of
@@ -263,8 +307,8 @@
 
 (defun make-rpm-window (&key (visible nil) (class nil) (title "RPM Window") (width 100) (height 100) (x 0 ) (y 0))
   (if visible
-      (if (and (visible-virtuals-available?) (null class))
-          (make-instance 'visible-virtual-window :window-title title :width width :height height :x-pos x :y-pos y)
+      (if (and (visible-virtuals-available?) (or (null class) (subtypep class 'visible-virtual-window)))
+          (make-instance (if class class 'visible-virtual-window) :window-title title :width width :height height :x-pos x :y-pos y)
         (let ((win (cg:make-window (new-name-fct "rpm-window") :device (if class class 'rpm-real-window) :title title :width width :height height :left x :top y))
             (catcher (make-instance 'key-catcher)
                      )
@@ -307,6 +351,16 @@
     :color (color-symbol->system-color color)
     :start-pt start-pt 
     :end-pt end-pt))
+
+(defmethod modify-line-for-rpm-window ((line liner) start-pt end-pt &key (color nil colorp))
+  (when start-pt
+    (setf (start-pt line) start-pt))
+  (when end-pt
+    (setf (end-pt line) end-pt))
+  (when colorp
+    (setf (color line) (color-symbol->system-color color)))
+  line)
+
 
 #|
 This library is free software; you can redistribute it and/or

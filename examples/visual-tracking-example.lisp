@@ -3,53 +3,35 @@
 ;;; device that uses a chunk based visicon (without having explicit
 ;;; objects set for the items).
 ;;;
-;;; Note that for the object-tracking function to actually move the x 
-;;; on the visible virtual experiment window it must be removed from
-;;; the display and then added back after modifying the x coordinate.
-;;; That may not be required for some native window systems which
-;;; will automatically move the item when the underlying object is
-;;; modified.  That is also not necessary for the model to notice
-;;; the change since the vision module is processing the underlying
-;;; representation i.e. even if the x didn't look like it was moving
-;;; to the modeler as long as the x-pos is being changed the model
-;;; sees it as moving.
+;;; To move the object on the screen the modify-text-for-exp-window 
+;;; command is being used.  That will move the x on both the virtual
+;;; and visible windows using the provided text items, but if one
+;;; is using native GUI code in a particular Lisp the appropriate
+;;; commands would be necessary to move and redisplay the item as
+;;; needed.
 
 (defun object-tracking () ;; old style with a screen object
   
   (reset)
   (let* ((window (open-exp-window "Moving X" :visible t))
-         (letter (add-text-to-exp-window :text "x" :x 10 :y 150)))
+         (letter (add-text-to-exp-window :text "x" :x 10 :y 150))
+         (x 10))
     
-    (if (not (subtypep (type-of window) 'virtual-window))
-        (print-warning "This example only works correctly for virtual and visible-virtual windows because the x coordinate accessor is specific to those objects.")
-      
-      (progn
-        (install-device window)
-        (proc-display)
-        (schedule-periodic-event .5 #'(lambda () 
-                                         
-                                        ;; This and the add-... are only necessary for the
-                                        ;; modeler to see the x move in a visible virtual window.
-                                        (remove-items-from-exp-window letter)
-                                        
-                                        ;; Virtual dialog item specific coordinate moving
-                                        ;; code.  Code for real windows is different for each
-                                        ;; Lisp since the x position accessor will differ.
-                                        
-                                        (setf (x-pos letter) (+ 10 (x-pos letter)))
-                                        
-                                        (add-items-to-exp-window letter)
-                                        
-                                        (proc-display))
-                                 :details "moving object"
-                                 :initial-delay 1.0)
-        
-        (run 3)))))
+    (install-device window)
+    (proc-display)
+    (schedule-periodic-event .5 #'(lambda () 
+                                    (setf x (+ 10 x))
+                                    (modify-text-for-exp-window letter :x x)
+                                    (proc-display))
+                             :details "moving object"
+                             :initial-delay 1.0)
+    
+    (run 3 :real-time t)))
 
 
 
 ;;; new style with a custom device and using the visual-location chunks directly
-;;
+
 ;;; First define the normal methods for a simple list based device.
 
 (defmethod device-move-cursor-to ((device list) loc)
@@ -154,21 +136,24 @@
   ;; warnings in the object tracking case.
   ;; (sgp :delete-visicon-chunks nil)
   
-(P found-letter
+(P start
    
    =visual-location>
-      ISA         visual-location
    
    ?visual>
       state        free
+   ?goal>
+      buffer empty
+ ==>
+   +goal>
    
-==>
    +visual>
       ISA         move-attention
       screen-pos  =visual-location
 )
 
 (P track-letter
+   =goal>
    =visual>
       ISA         visual-object
       value       =letter
@@ -180,6 +165,7 @@
 )
 
 (p report
+   =goal>
    =visual-location>
       isa         visual-location
       screen-x    =x

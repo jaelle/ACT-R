@@ -31,6 +31,8 @@ proc select_stepper {} {
   global next_stepper_event
   global .stepper.current_text.var
 
+  global options_array
+
   if {[winfo exists .stepper] == 1} {
     wm deiconify .stepper
     raise .stepper
@@ -45,7 +47,7 @@ proc select_stepper {} {
 
     send_environment_cmd \
       "create simple-handler .stepper stepper_temp \
-         (lambda (x) (declare (ignore x)) (if (or (mp-running?) (environment-busy-p) (environment-control-stepper-open *environment-control*)) 1 (if (environment-control-pre-hook *environment-control*) 0 (if (mp-models) 2 3)))) ()"
+         (lambda (x) (declare (ignore x)) (if (or (mp-running?) (environment-busy-p) (environment-control-stepper-open *environment-control*)) 1 (if (environment-control-pre-hook *environment-control*) (if (every (lambda (x) (with-model-eval x (null (car (no-output (sgp :v)))))) (mp-models)) 5 0) (if (mp-models) 2 3)))) ()"
 
     wait_for_non_null stepper_temp
 
@@ -69,6 +71,11 @@ proc select_stepper {} {
 
       remove_handler .stepper
     } else {
+    
+      if {$stepper_temp == 5 && $options_array(stepper_v_nil) == 1 } {
+        tk_messageBox -icon info -type ok -title "Stepper" \
+                  -message "All models currently have :v set to nil which means there will be no events for the stepper to use."
+      }
 
       remove_handler .stepper
 
@@ -742,9 +749,9 @@ proc tutor_hint {word side buf} {
   } elseif {$side == "rhs"} {
     set tutor_help "You should find the binding for $word on\nthe left hand side of the production first."
   } elseif {[string compare -nocase $word "=goal"] == 0 || [string compare -nocase $word "=retrieval"] == 0} {
-    set tutor_help "Use the buffer viewer to determine the chunk in the [string range $word 1 end] buffer."
+    set tutor_help "Use the buffer contents tool to determine the chunk in the [string range $word 1 end] buffer."
   } elseif {$side == "lhs" && $buf != ""} { 
-    set tutor_help "$word is in a slot of the [string range $buf 1 end] buffer.\nYou can find its value using the buffer viewer."
+    set tutor_help "$word is in a slot of the [string range $buf 1 end] buffer.\nYou can find its value using the buffer contents tool."
   } else {
     set tutor_help "No hint is available for this variable. (contact Dan because this is an error)"
   }

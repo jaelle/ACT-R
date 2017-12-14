@@ -25,6 +25,7 @@
 
 
 (clear-all)
+(require-extra "threads")
 
 (define-model sample
 

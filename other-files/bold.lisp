@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Filename    : bold.lisp
-;;; Version     : 3.0
+;;; Version     : 3.1
 ;;;
 ;;; Description : Computes predictions of the BOLD response based on activity
 ;;;               of the buffers in a module.
@@ -255,6 +255,30 @@
 ;;;             :   done with the seconds.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2016.05.02 Dan [3.1]
+;;;             : * Changing the environment support code to work with the saved
+;;;             :   history information.
+;;;             : * The data cache is now outside of the module so it's not tied
+;;;             :   to a current model. 
+;;;             : * Need a parameter to allow the saving of all the necessary 
+;;;             :   BOLD module parameters into a file through the environment.
+;;;             :   The :save-bold-data parameter is effectively a dummy parameter.
+;;;             :   It will be set automatically with the :save-buffer-trace value
+;;;             :   and setting :save-bold-data will enable :save-buffer-trace but
+;;;             :   turning :save-bold-data off will not turn :save-buffer-trace off.
+;;;             : * Change bold-module-max-table to an alist because that can be
+;;;             :   written to a file and it's probably more efficient in many
+;;;             :   cases as well.
+;;; 2016.05.04 Dan
+;;;             : * The buffer trace saved for the environment has extra info in
+;;;             :   it now, so only need the first item on the list.
+;;; 2016.05.17 Dan
+;;;             : * Fixed a bug with all the environment handlers since 
+;;;             :   no-output can't be called when there isn't a current model.
+;;; 2016.05.27 Dan
+;;;             : * Fixed a potential issue with parse-trace-lists-for-bold 
+;;;             :   because if a buffer isn't recorded for the whole run it
+;;;             :   would result in an error.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -392,7 +416,7 @@
   (/ (buffer-record-ms-time x) 1000))
 
 (defstruct bold-module
-   scale (exp 0) inc settle point env-cache v cmdt buffers max-table c1 c2 (neg-exp 0) neg-scale mode)
+   scale (exp 0) inc settle point v cmdt buffers max-table c1 c2 (neg-exp 0) neg-scale mode save-data colors end)
 
 (defun bold_partial_gammapdf (time a b)
   "Compute the gammapdf function without this part: 1/(b*a!) because that will be multiplied through at the end"
@@ -461,8 +485,8 @@
          (v i (* v i)))
         ((= i 1) v)))
 
-(defun parse-trace-lists-for-bold (bm)
-   (let* ((trace (get-current-buffer-trace))
+(defun parse-trace-lists-for-bold (bm &optional trace-data (end-time (mp-time-ms)))
+   (let* ((trace (if trace-data trace-data (get-current-buffer-trace)))
           (b (bold-module-buffers bm))
           (buffers (if (listp b) b (buffers)))
           (all-data nil))
@@ -472,30 +496,31 @@
              (current-rect nil))
            (dolist (z trace)
              (let ((record (find x (buffer-record-buffers z) :key 'buffer-summary-name)))
-               (if current-rect
-                  (when (or (null (buffer-summary-busy record))
-                             (buffer-summary-busy->free record)
-                             (buffer-summary-request record))
-
-                    (push-last (cons current-rect (bold-buffer-record-times z)) rects)
-                    (if (buffer-summary-request record)
-                         (setf current-rect (bold-buffer-record-times z))
-                       (setf current-rect nil)))
-
-                 (if (buffer-summary-busy record)
-                     (if (and (buffer-summary-request record)
-                              (or (buffer-summary-chunk-name record)
-                                  (and (buffer-summary-error record)
-                                       (not (buffer-summary-error->clear record)))
-                                  (buffer-summary-busy->free record)))
+               (when record 
+                 (if current-rect
+                     (when (or (null (buffer-summary-busy record))
+                               (buffer-summary-busy->free record)
+                               (buffer-summary-request record))
+                       
+                       (push-last (cons current-rect (bold-buffer-record-times z)) rects)
+                       (if (buffer-summary-request record)
+                           (setf current-rect (bold-buffer-record-times z))
+                         (setf current-rect nil)))
+                   
+                   (if (buffer-summary-busy record)
+                       (if (and (buffer-summary-request record)
+                                (or (buffer-summary-chunk-name record)
+                                    (and (buffer-summary-error record)
+                                         (not (buffer-summary-error->clear record)))
+                                    (buffer-summary-busy->free record)))
+                           (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects)
+                         (setf current-rect (bold-buffer-record-times z)))
+                     (if (buffer-summary-request record)
                          (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects)
-                       (setf current-rect (bold-buffer-record-times z)))
-                   (if (buffer-summary-request record)
-                       (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects)
-                     (when (buffer-summary-chunk-name record)
-                       (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects)))))))
+                       (when (buffer-summary-chunk-name record)
+                         (push-last (cons (bold-buffer-record-times z) (bold-buffer-record-times z)) rects))))))))
          
-         (when current-rect (push-last (cons current-rect (mp-time)) rects))
+         (when current-rect (push-last (cons current-rect (/ end-time 1000)) rects))
          (push (cons x rects) all-data)))
      
      all-data))
@@ -557,10 +582,12 @@
           (dolist (x bold)
             (let* ((buffer (car x))
                    (data (cdr x))
-                   (max (when data (apply #'max data))))
-              (when (or (null (gethash buffer (bold-module-max-table bm)))
-                        (> max (gethash buffer (bold-module-max-table bm))))
-                (setf (gethash buffer (bold-module-max-table bm)) max))))
+                   (max (when data (apply #'max data)))
+                   (old-max (assoc buffer (bold-module-max-table bm))))
+              (cond ((null old-max)
+                     (push (cons buffer max) (bold-module-max-table bm)))
+                    ((> max (cdr old-max))
+                     (setf (cdr old-max) max)))))
           (output-bold-response-data bold bm start end)
           bold))))))
    
@@ -686,20 +713,22 @@
       (command-output "~?" (format nil "~~{~~~d,@a~~}" max-len) transposed)
       (command-output (format nil "~~{~~{~~~d,3f~~}~~%~~}" max-len) (cdr transposed)))))
 
-(defun reset-bold-module (bm)
-  (setf (bold-module-env-cache bm) (make-hash-table :test 'equalp)))
 
 (defun create-bold-module (name) 
   (declare (ignore name))
   (let ((bm (make-bold-module)))
-    (setf (bold-module-max-table bm) (make-hash-table))
+    
     bm))
 
 
+(defun reset-bold-module (module)
+  (setf (bold-module-max-table module) nil))
 
 (defun handle-bold-params (instance param)
    (cond ((consp param)
           (case (car param)
+            (:buffer-trace-colors 
+             (setf (bold-module-colors instance) (cdr param)))
             (:v
             (setf (bold-module-v instance) (cdr param)))
             (:cmdt
@@ -733,7 +762,14 @@
                    ((and (eq (cdr param) 'spm) (= (bold-module-exp instance) 5) (= (bold-module-neg-exp instance) 15))
                     (setf (bold-module-exp instance) 6) 
                     (setf (bold-module-neg-exp instance) 16)))
-             (setf (bold-module-mode instance) (cdr param)))))
+             (setf (bold-module-mode instance) (cdr param)))
+            (:save-bold-data 
+             (setf (bold-module-save-data instance) (cdr param))
+             (when (cdr param)
+               (no-output (unless (car (sgp :save-buffer-trace))
+                            (sgp :save-buffer-trace t)))))
+            (:save-buffer-trace 
+             (setf (bold-module-save-data instance) (cdr param)))))
          (t
           (case param
             (:bold-scale
@@ -757,13 +793,17 @@
             (:point-predict
              (bold-module-point instance))
             (:bold-param-mode
-             (bold-module-mode instance))))))
+             (bold-module-mode instance))
+            (:save-bold-data 
+             (bold-module-save-data instance))))))
 
 (define-module-fct 'bold nil
    (list
     (define-parameter :v :owner nil)
+    (define-parameter :buffer-trace-colors :owner nil)
     (define-parameter :cmdt :owner nil)
     (define-parameter :traced-buffers :owner nil)
+    (define-parameter :save-buffer-trace :owner nil)
     (define-parameter :bold-param-mode
       :valid-test (lambda (x) (or (eq x 'act-r) (eq x 'spm)))
       :warning "either act-r or spm"
@@ -817,45 +857,126 @@
       :valid-test (lambda (x) (and (listp x) (every (lambda (y) (find y (buffers))) x)))
       :warning "a list of buffer names"
       :default-value (list 'goal)
-      :documentation "List of buffers for which the point based computation should be used to compute the BOLD response."))
+      :documentation "List of buffers for which the point based computation should be used to compute the BOLD response.")
+    (define-parameter :save-bold-data
+      :valid-test 'tornil
+      :warning "T or nil"
+      :default-value nil
+      :documentation "Can be used instead of :save-buffer-trace to enable the saving of module activity."))
 
-   :creation 'create-bold-module
+  :creation 'create-bold-module
   :reset 'reset-bold-module
   :params #'handle-bold-params
-   :version "3.0"
-   :documentation "A module to produce BOLD response predictions from buffer request activity.")
+  :version "3.1"
+  :documentation "A module to produce BOLD response predictions from buffer request activity.")
 
 (defun bold-data-buffer-max (buffer)
   (let ((bm (get-module bold)))
-    (gethash buffer (bold-module-max-table bm))))
+    (cdr (assoc buffer (bold-module-max-table bm)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;
 ;;;; The code below supports the tools available through the environment.
 ;;;; 
 
+
+(defun get-bold-module-data ()
+  (get-module bold))
+
+(defun save-bold-data-info (data stream)
+  (setf (bold-module-end data) (mp-time-ms))
+  (write data :stream stream))
+
 (defparameter *pixels-per-second-for-bold* 100)
 (defparameter *bold-vertical-scale* 400)
+(defvar *bold-data-environment-cache* (make-hash-table :test 'equalp))
 
-(defun cache-bold-data (dialog)
-  (let ((bm (get-module bold)))
-    (aif (gethash dialog (bold-module-env-cache bm))
-         it
-         (setf (gethash dialog (bold-module-env-cache bm)) (predict-bold-response)))))
+(defun bold-tool-buffer-list (key)
+  (let ((data (get-history-information :save-bold-data key)))
+    (if data
+        (bold-module-buffers data)
+      (buffers))))
+
+
+(defun cache-bold-data (dialog key)
+  (aif (gethash dialog *bold-data-environment-cache*)
+       it
+       (setf (gethash dialog *bold-data-environment-cache*) (predict-bold-response-for-environment key))))
 
 (defun uncache-bold-data (dialog)
-  (let ((bm (get-module bold)))
-    (remhash dialog (bold-module-env-cache bm)))
+  (remhash dialog *bold-data-environment-cache*)
   (list 'gone))
 
-(defun parse-bold-predictions-for-graph (chart buffer local start end)
+
+(defun predict-bold-response-for-environment (key)
+  (let* ((bm (get-history-information :save-bold-data key))
+         (buffer-trace (first (get-history-information :save-buffer-trace key)))
+         (start 0)
+         (end (aif (numberp (bold-module-end bm)) (bold-module-end bm) (mp-time-ms)))
+         
+         (data (parse-trace-lists-for-bold bm buffer-trace end))
+         
+         (bold nil)
+         (point (bold-module-point bm))
+         (inc (bold-module-inc bm))
+         (c1 (bold-module-c1 bm))
+         (c2 (bold-module-c2 bm))
+         (ap (if (eq (bold-module-mode bm) 'spm)
+                 (1- (bold-module-exp bm))
+               (bold-module-exp bm)))
+         (an (if (eq (bold-module-mode bm) 'spm)
+                 (1- (bold-module-neg-exp bm))
+               (bold-module-neg-exp bm)))
+         (bp (bold-module-scale bm))
+         (bn (bold-module-neg-scale bm))
+         ;; since the 1/(b*factorial(a)) is a constant in the gammapdf function it can be
+         ;; factored out and applied at the end along with the relative scaling between positive
+         ;; and negative 
+         (pos-factor (unless (zerop c1) 
+                       (if (eq (bold-module-mode bm) 'spm)
+                           (/ c1 (* (max c1 c2) bp (bold_factorial ap)))
+                         (/ c1 (- c1 c2) bp (bold_factorial ap)))))
+         (neg-factor (unless (zerop c2)
+                       (if (eq (bold-module-mode bm) 'spm)
+                           (/ c2 (* (max c1 c2) bn (bold_factorial an)))
+                         (/ c2 (- c1 c2) bn (bold_factorial an))))))
+      
+      
+      (if (< (- end start) (* 1000 inc))
+          (print-warning "Sample time too short for BOLD predictions - must be at least :bold-inc seconds (currently ~s)" inc)
+        (progn
+          (unless (zerop (mod start inc))
+            (setf start (* inc (floor start inc)))
+            (model-warning "Start time should be a multiple of :bold-inc (~S).  Using start time of ~S." inc start))
+          
+          (dolist (x data)
+            (push (cons (car x) (bold-predict (cdr x) start (/ end 1000) inc (bold-module-settle bm) c1 c2 ap bp pos-factor an bn neg-factor (find (car x) point))) bold))
+          
+          ;; Cache the max values for each buffer so that they can
+          ;; be used in normalizing things later if desired
+          
+          (dolist (x bold)
+            (let* ((buffer (car x))
+                   (data (cdr x))
+                   (max (when data (apply #'max data)))
+                   (old-max (assoc buffer (bold-module-max-table bm))))
+              (cond ((null old-max)
+                     (push (cons buffer max) (bold-module-max-table bm)))
+                    ((> max (cdr old-max))
+                     (setf (cdr old-max) max)))))
+          bold))))
+
+
+
+(defun parse-bold-predictions-for-graph (chart key buffer local start end)
   
-  (let* ((d (no-output (cache-bold-data chart)))
+  (let* ((d (cache-bold-data chart key))
+         (module (get-history-information :save-bold-data key))
          (all-data (when (> (length (car d)) 1)
                      (if local
                          (normalize-bold-data-for-env-local d)
                        (normalize-bold-data-for-env d))))
-         (time-inc (car (no-output (sgp :bold-inc))))
+         (time-inc (bold-module-inc module))
          (dummy-data (cdar all-data))
          (data nil)
          (s-index (if (= start -1) 0 (min (floor start time-inc) (length dummy-data))))
@@ -897,9 +1018,9 @@
         (let ((bd (cdr (find buffer all-data :key #'car))))
           (if bd
               (let* ((buffer-data (subseq bd s-index e-index))
-                     (b (no-output (car (sgp :traced-buffers))))
+                     (b (bold-module-buffers module))
                      (buffers (if (listp b) b (buffers)))
-                     (colors (no-output (car (sgp :buffer-trace-colors))))
+                     (colors (bold-module-colors module))
                      (color-list (create-color-list (if (and (listp b) colors) colors nil) buffers *gt-colors*))
                      (cur-color (nth (position buffer buffers) color-list)))
                   
@@ -947,8 +1068,8 @@
   new-data))
 
 
-(defun bold-brain-data-results (chart local)
-  (let* ((d (no-output (cache-bold-data chart)))
+(defun bold-brain-data-results (chart key local)
+  (let* ((d (cache-bold-data chart key))
          (result nil)
          (size (length (first d)))
          )
@@ -978,8 +1099,8 @@
               (push (format nil "~{~a ~}" (make-list size :initial-element "{}")) result))))
         (reverse result)))))
 
-(defun bold-brain-3d-data ()
-  (let* ((d (no-output (predict-bold-response)))
+(defun bold-brain-3d-data (chart key)
+  (let* ((d (cache-bold-data chart key))
          (result nil)
          (size (length (first d))))
     (if (<= size 1)
@@ -1028,7 +1149,7 @@
             (setf result (concatenate 'string result 
                            (if nums
                                (let* ((val (car (last nums)))
-                                      (max (gethash region (bold-module-max-table bm))))
+                                      (max (cdr (assoc region (bold-module-max-table bm)))))
                                  (if (numberp val)
                                      (princ-to-string 
                                       (if (and max (numberp max) (not (zerop max)))

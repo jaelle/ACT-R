@@ -258,6 +258,15 @@
 ;;;             :   without loss of accuracy that converting to a float might have.
 ;;;             :   It is used like this: (format t "~10/print-time-in-seconds/" ms-time)
 ;;;             :   The only modifier it uses is the first one which specifies the min width.
+;;; 2016.05.31 Dan
+;;;             : * Added finish-output to print-warning and model-warning since
+;;;             :   at least one Lisp seems to buffer *error-output* for some 
+;;;             :   crazy reason!
+;;;             : * Using the finish-format macro instead now since there are
+;;;             :   other places that have the same issue.
+;;; 2016.06.24 Dan
+;;;             : * Create a single 'dummy' broadcast stream to use for suppress-
+;;;             :   warnings instead of creating a fresh one each time.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -439,7 +448,7 @@
 
 (defmacro print-warning (message &rest arguments)
   "Outputs a warning of message and arguments."
-  `(format *error-output* "~&#|Warning~:[~*~;~@[ (in model ~a)~]~]: ~@? |#~%" (and (current-mp-fct) (> (length (mp-models)) 1)) (current-model) ,message ,@arguments))
+  `(finish-format *error-output* "~&#|Warning~:[~*~;~@[ (in model ~a)~]~]: ~@? |#~%" (and (current-mp-fct) (> (length (mp-models)) 1)) (current-model) ,message ,@arguments))
 
 
 (defun hash-table-keys (ht)
@@ -599,7 +608,9 @@
            (unwind-protect 
                (progn ,@commands)
              (setf (printing-module-suppress-cmds ,module) ,current)))))))
-     
+
+(defvar *act-r-empty-output-stream* (make-broadcast-stream))
+
 (defmacro suppress-warnings (&rest commands)
   "Suppress all ACT-R warnings while evaluating ACT-R commands"
   (let ((module (gensym))
@@ -609,13 +620,13 @@
          (multiple-value-bind (,module ,present)
              (get-module-fct 'printing-module)
            (when ,present
-             (let ((*error-output* (make-broadcast-stream))
+             (let ((*error-output* *act-r-empty-output-stream*)
                    (,current (printing-module-model-warnings ,module)))
                (setf (printing-module-model-warnings ,module) nil) 
                (unwind-protect 
                    (progn ,@commands)
                  (setf (printing-module-model-warnings ,module) ,current)))))
-       (let ((*error-output* (make-broadcast-stream)))
+       (let ((*error-output* *act-r-empty-output-stream*))
          ,@commands))))
   
 
@@ -660,24 +671,22 @@
         (present (gensym))
         (stream (gensym)))
     `(multiple-value-bind (,module ,present)
-       (get-module-fct 'printing-module)
-     (when (and ,present (act-r-output-stream (printing-module-v ,module)))
-       (let ((,stream (act-r-output-stream (printing-module-v ,module))))
-         (cond ((null (printing-module-model-warnings ,module))
-                ;; just suppress the warnings
-                nil)
-               ((or (null ,stream)
-                    (eq ,stream *error-output*)
-                    *one-stream-hack*
-                    (and (eq ,stream t) (eql *error-output* *standard-output*)))
-                (format *error-output* 
-                    "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args))
-               (t
-                (format *error-output* 
-                    "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
-                (format ,stream 
-                    "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
-                nil)))))))
+         (get-module-fct 'printing-module)
+       (when (and ,present (act-r-output-stream (printing-module-v ,module)))
+         (let ((,stream (act-r-output-stream (printing-module-v ,module))))
+           (cond ((null (printing-module-model-warnings ,module)))
+                 ((or (null ,stream)
+                      (eq ,stream *error-output*)
+                      *one-stream-hack*
+                      (and (eq ,stream t) (eql *error-output* *standard-output*)))
+                  (finish-format *error-output* "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" 
+                    (> (length (mp-models)) 1) (current-model) ,control-string ,@args))
+                 (t
+                  (finish-format *error-output* "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" 
+                    (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
+                  (format ,stream "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%"
+                    (> (length (mp-models)) 1) (current-model) ,control-string ,@args)))
+           nil)))))
 
 
 (defmacro one-time-model-warning (tag control-string &rest args)
@@ -690,21 +699,19 @@
        (let ((,stream (act-r-output-stream (printing-module-v ,module))))
          (unless (find ,tag (printing-module-one-time-tags ,module) :test 'equal)
            (push ,tag (printing-module-one-time-tags ,module))
-           (cond ((null (printing-module-model-warnings ,module))
-                  ;; just suppress the warnings
-                  nil)
+           (cond ((null (printing-module-model-warnings ,module)))
                  ((or (null ,stream)
                       (eq ,stream *error-output*)
                       *one-stream-hack*
                       (and (eq ,stream t) (eql *error-output* *standard-output*)))
-                  (format *error-output* 
-                      "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args))
+                  (finish-format *error-output* "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%"
+                                 (> (length (mp-models)) 1) (current-model) ,control-string ,@args))
                  (t
-                  (format *error-output* 
-                      "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
-                  (format ,stream 
-                      "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
-                  nil))))))))
+                  (finish-format *error-output* "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%"
+                                 (> (length (mp-models)) 1) (current-model) ,control-string ,@args)
+                  (format ,stream "~&#|Warning~:[~*~; (in model ~a)~]: ~@? |#~%" 
+                    (> (length (mp-models)) 1) (current-model) ,control-string ,@args)))
+           nil))))))
 
 
 (defmacro meta-p-output (control-string &rest args)

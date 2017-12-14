@@ -1,3 +1,4 @@
+
 ;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -62,6 +63,36 @@
 ;;;             :   for a "static text" item since I can't seem to get the other
 ;;;             :   mechanisms to work right.  May need to fix that at some point
 ;;;             :   in the future.
+;;; 2016.06.08 Dan
+;;;             : * Allow the class in make-rpm-window to override visible-
+;;;             :   virtual-windows if it's a subtype of that class.
+;;;             : * Removed the *lw-win* variable that wasn't being used for 
+;;;             :   anything.
+;;; 2016.06.09 Dan
+;;;             : * Fixed a bug with creating lines.  The td-liner instances 
+;;;             :   weren't getting a view-position which caused an error when
+;;;             :   building the features for the item.
+;;; 2016.06.13 Dan
+;;;             : * Starting to add a modify action for text items as a first test.
+;;;             : * Changed remove-items to save the x,y position since that
+;;;             :   seems to be lost for something that's on the screen and then
+;;;             :   removed.
+;;;             : * Changed remove-all-items to do the same thing.
+;;; 2016.06.14 Dan
+;;;             : * Adding the modify for buttons and lines (which are really more
+;;;             :   replaces since they create a new item as does the one for text).
+;;; 2016.06.17 Dan
+;;;             : * Replaced the line creation code so that it just uses the
+;;;             :   standard capi:line-pinboard-object class, and the modify code
+;;;             :   can now just use the capi:move-line function to actually 
+;;;             :   modify the object.
+;;;             : * The modify text item now properly modifies the provided item.
+;;; 2016.06.20 Dan
+;;;             : * Update the modify button code so that it changes the button
+;;;             :   object itself.
+;;; 2016.06.21 Dan
+;;;             : * Now the modify button code changes all the attributes for the
+;;;             :   button.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -175,7 +206,10 @@
      pinboard     
      #'(lambda(pinboard items)
          (setf (capi:layout-description pinboard)
-               (remove-if #'(lambda (x) (member x items))
+           (remove-if #'(lambda (x) (when (member x items)
+                                      (setf (getf (capi::hint-table x) :x) (point-h (view-position x)))
+                                      (setf (getf (capi::hint-table x) :y) (point-v (view-position x)))
+                                      t))
                               (capi:layout-description pinboard)))
          (setq done t))
      pinboard
@@ -203,7 +237,13 @@
   (let* ((pinboard (pinboard win))
          (done nil))
     (capi:apply-in-pane-process pinboard     
-                                #'(lambda (x)  (setf (capi:layout-description x) nil) (setq done t)) pinboard)
+                                #'(lambda (x)  
+                                    (setf (getf (capi::hint-table x) :x) (point-h (view-position x)))
+                                    (setf (getf (capi::hint-table x) :y) (point-v (view-position x)))
+                                    
+                                    (setf (capi:layout-description x) nil)
+                                    (setq done t))
+                                pinboard)
     (mp:process-wait "Waiting for visual items"
                      #'(lambda () done))))
 
@@ -225,21 +265,20 @@
 ;;;             : virtual and if the environment is connected it will use a 
 ;;;             : visible-virtual for the real window unless the user explicitly
 ;;;             : specifies the class to use.
-(defvar *lw-win* nil)
+
 (defun make-rpm-window (&key (visible nil) (class nil) (title "RPM Window") 
                              (width 100) (height 100) (x 0 ) (y 0))
   "Make and return a window for use with the UWI"
   (let ((win
          (if visible
-             (if (and (visible-virtuals-available?) (null class))
-                 (make-instance 'visible-virtual-window :window-title title 
-                                :width width :height height :x-pos x :y-pos y)
+             (if (and (visible-virtuals-available?) (or (null class) (subtypep class 'visible-virtual-window)))
+                 (make-instance (if class class 'visible-virtual-window) :window-title title :width width :height height :x-pos x :y-pos y)
                (make-instance (if class class 'rpm-real-window) 
-                              :title title :best-x x :best-y y :best-width width :best-height height ))
+                 :title title :best-x x :best-y y :best-width width :best-height height ))
            (make-instance (if class class 'rpm-virtual-window) :window-title title 
-                          :width width :height height :x-pos x :y-pos y))))
+             :width width :height height :x-pos x :y-pos y))))
     (aif win (if (typep it 'rpm-real-window) (capi:display it)))
-    (setq *lw-win* win)))
+    win))
 
 
 ;;; MAKE-BUTTON-FOR-RPM-WINDOW  [Method]
@@ -255,8 +294,89 @@
                         :text text
                         :foreground (color-symbol->system-color color)
                         :callback-type :item
-                        :callback action
-                        ))
+                        :callback action))
+
+
+(defmethod modify-button-for-rpm-window ((button capi:push-button) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (action nil actionp))
+  "Modify a button item for the rpm window"
+  
+  (let* ((pb (slot-value button 'capi::parent))
+         (ht (capi::hint-table button))
+         (ox (if pb
+                 (point-h (view-position button))
+               (getf ht :x)))
+         (oy (if pb
+                 (point-v (view-position button))
+               (getf ht :y)))
+         (oheight (getf ht :visible-min-height))
+         (owidth (getf ht :visible-min-width)))
+    
+    (unless colorp 
+      (setf color (system-color->symbol (capi:simple-pane-foreground button))))
+    (unless actionp
+      (setf action (capi:callbacks-selection-callback button)))
+    (unless textp
+      (setf text (capi:item-text button)))
+    (unless heightp
+      (setf height oheight))
+    (unless widthp
+      (setf width owidth))
+    (unless xp
+      (setf x ox))
+    (unless yp
+      (setf y oy))
+    
+    (setf (capi:simple-pane-foreground button) (color-symbol->system-color color))
+    (setf (capi:item-text button) text)
+    (setf (capi:callbacks-selection-callback button) action)
+    
+    
+    (let ((on-screen (and pb (find button (capi:layout-description pb)))))
+      
+      (when  on-screen ;; take it off screen using pinboard
+        (let* ((done nil))
+          (capi:apply-in-pane-process 
+           pb
+           #'(lambda(pinboard items)
+               (setf (capi:layout-description pinboard)
+                 (remove items (capi:layout-description pinboard)))
+               (setq done t))
+           pb
+           button)
+          (mp:process-wait "Waiting for visual items"
+                           #'(lambda () done))))
+      
+
+      ;; modify the hint info
+      
+      (setf (getf ht :x) x)
+      (setf (getf ht :y) y)
+  
+      (setf (getf ht :visible-min-height) height)
+      (setf (getf ht :visible-min-width) width)
+      
+      ;; set the object's slot to the modified table
+      ;; to be safe since adding a new items just cons on the front
+      
+      (setf (slot-value button 'capi::hint-table) ht)
+      
+      (when on-screen ;; put it back on the pinboard
+        
+        (let* ((done nil))
+          (capi:apply-in-pane-process 
+           pb    
+           #'(lambda(pinboard items)
+               (setf (capi:layout-description pinboard)
+                 (append (capi:layout-description pinboard) items))
+               (setq done t))
+           pb
+           (list button))
+          (mp:process-wait "Waiting for visual items"
+                           #'(lambda () done)))))
+
+    button))
+
+
 
 ;;; MAKE-STATIC-TEXT-FOR-RPM-WINDOW  [Method]
 ;;; Description : Build and return a static-text-dialog-item based on the
@@ -272,47 +392,96 @@
     :x x :y y
     :visible-min-width width :visible-min-height height
     :text text
-    :graphics-args (list :foreground (read-from-string (format nil ":~S" color))
+    :graphics-args (list :foreground (color-symbol->system-color color)
                          :font (gp:gf "courier" nil nil nil font-size))))
+
+(defmethod modify-text-for-rpm-window ((text-item capi:item-pinboard-object) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (font-size nil font-sizep))
+  "Modify a text item for the rpm window"
+ 
+  (let ((pb (capi:pinboard-object-pinboard text-item))
+        (ht (capi::hint-table text-item)))
+    
+    (unless colorp 
+      (setf color (system-color->symbol (capi:pinboard-object-graphics-arg text-item :foreground))))
+    (unless font-sizep
+      (setf font-size (slot-value (capi:pinboard-object-graphics-arg text-item :font) 'graphics-ports::size)))
+    (unless textp
+      (setf text (capi:item-text text-item)))
+    (unless heightp
+      (setf height 
+            (if pb
+                (point-v (view-size text-item))
+              (getf ht :visible-min-height))))
+    (unless widthp
+      (setf width 
+            (if pb
+                (point-h (view-size text-item))
+              (getf ht :visible-min-width))))
+    (unless xp
+      (setf x (if pb
+                  (point-h (view-position text-item))
+                (getf ht :x))))
+    (unless yp
+      (setf y (if pb
+                  (point-v (view-position text-item))
+                (getf ht :y))))
+    
+    (setf (capi:pinboard-object-graphics-arg text-item :foreground) (color-symbol->system-color color))
+    (setf (capi:pinboard-object-graphics-arg text-item :font) (gp:gf "courier" nil nil nil font-size))
+    (setf (capi:item-text text-item) text)
+      
+    (if pb
+        (progn
+          (setf (capi:static-layout-child-position text-item) (values x y))
+          (setf (capi:static-layout-child-size text-item) (values width height))
+          )
+      (progn
+        (setf (getf ht :visible-min-width) width) 
+        (setf (getf ht :visible-min-height) height)    
+        (setf (getf ht :x) x)      
+        (setf (getf ht :y) y)))
+
+    text-item))
 
 
 ;;; MAKE-LINE-FOR-RPM-WINDOW  [Method]
-;;; Description : Build and return the appropriate liner object for the
+;;; Description : Build and return a capi:line-pinboard-object for the
 ;;;             : window based on the parameters supplied.
 
 (defmethod make-line-for-rpm-window ((wind rpm-real-window) start-pt end-pt 
                                      &optional (color 'black))
-  (flet ((make-point (x y) (vector x y))
-         (color-symbol->system-color (color) (read-from-string (format nil ":~S" color))))
-  (let* ((gx (> (first end-pt) (first start-pt)))
-         (gy (> (second end-pt) (second start-pt)))
-         (vs (make-point (+ 1 (abs (- (first end-pt) (first start-pt)))) (+ 1 (abs (- (second end-pt) (second start-pt))))))
-         )
-    (cond ((and gx gy)
-           (make-instance 'td-liner
-             :foreground (color-symbol->system-color color)
-             :start-x (first start-pt) :start-y (second start-pt)  
-             :end-x (first end-pt) :end-y (second end-pt)))
-          ((and (not gx) (not gy))
-           (make-instance 'td-liner
-             :foreground (color-symbol->system-color color)
-             :start-x (first end-pt) :start-y (second end-pt)  
-             :end-x (first start-pt) :end-y (second start-pt)))
-          ((and gx (not gy))
-           (make-instance 'bu-liner
-             :foreground (color-symbol->system-color color)
-             :start-x (first start-pt) :start-y (second end-pt)  
-             :end-x (first end-pt) :end-y (second start-pt)
-             :view-position (make-point (first start-pt) (second end-pt))
-             :view-size vs))  
-          (t
-           (make-instance 'bu-liner
-             :foreground (color-symbol->system-color color)
-             :start-x (first end-pt) :start-y (second start-pt)  
-             :end-x (first start-pt) :end-y (second end-pt)
-              :view-position (make-point (first end-pt) (second start-pt))
-              :view-size vs))
-             ))))
+  (when (<= (first end-pt) (first start-pt))
+    (rotatef start-pt end-pt))
+
+  (make-instance 'capi:line-pinboard-object
+                 :foreground (color-symbol->system-color color)
+                 :start-x (first start-pt) :start-y (second start-pt)  
+                 :end-x (first end-pt) :end-y (second end-pt)))
+
+
+(defmethod modify-line-for-rpm-window ((line capi:line-pinboard-object) start-pt end-pt &key (color nil colorp))
+  
+  (let ((points (capi::coords line))
+        (cur-color (system-color->symbol (capi:simple-pane-foreground line))))
+    
+    (unless start-pt
+      (setf start-pt (list (first points) (second points))))
+    (unless end-pt
+      (setf end-pt (list (third points) (fourth points))))
+    (unless colorp
+      (setf color cur-color))
+
+    (when (<= (first end-pt) (first start-pt))
+      (rotatef start-pt end-pt))
+    
+       
+    (let ((pb (slot-value line 'capi::parent)))
+   
+      (setf (capi:simple-pane-foreground line) (color-symbol->system-color color))
+      (capi:move-line line (first start-pt) (second start-pt) (first end-pt) (second end-pt)
+                      :redisplay (and pb (find line (capi:layout-description pb)))))  ;; the old one was on the screen
+        
+    line))
 
 ;;; ALLOW-EVENT-MANAGER  [Method]
 ;;; Description : Call event-dispatch.  This is used while waiting for

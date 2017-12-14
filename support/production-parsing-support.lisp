@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : production-parsing-support.lisp
-;;; Version     : 2.0
+;;; Version     : 4.0
 ;;; 
 ;;; Description : Functions and code that's used by both p and p* parsing.
 ;;; 
@@ -214,6 +214,22 @@
 ;;; 2015.12.16 Dan
 ;;;             : * Those tracking tags are now a second return value from the
 ;;;             :   function that schedules them.
+;;; 2016.03.07 Dan [4.0]
+;;;             : * Actually making the "no special cases" claim for production
+;;;             :   syntax closer to being true:
+;;;             :   - An empty * action is now allowed.
+;;;             :   - The @ action takes all 3 forms - empty, chunk/var, or full
+;;;             :     specification.
+;;;             :     The full spec does the same thing as providing a chunk --
+;;;             :     overwritting the current buffer chunk (with a dummy chunk
+;;;             :     that's created for that purpose and then deleted), but the
+;;;             :     empty action is a special case and does a buffer erase 
+;;;             :     instead of an overwrite (the opposite of an empty = which
+;;;             :     keeps the chunk around).
+;;; 2016.05.31 Dan
+;;;             : * Anything that writes to *error-output* now uses finish-format
+;;;             :   to avoid problems if that's buffered -- it should still show
+;;;             :   immediately.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -294,10 +310,10 @@
                                            (push-last end warn-indices))))
                                     (if (= (length starts) (length ends))
                                         (dolist (x (pairlis starts ends))
-                                          (format *error-output* "~a~%" (subseq warn-text (car x) (+ 2 (cdr x)))))
+                                          (finish-format *error-output* "~a~%" (subseq warn-text (car x) (+ 2 (cdr x)))))
                                       (progn 
                                         (print-warning "Production has #| or |# sequences within it which affects how the warnings are displayed")
-                                        (format *error-output* warn-text)))))
+                                        (finish-format *error-output* warn-text)))))
                                   (print-warning "--- end of warnings for undefined production ~s ---" 
                                                  (aif (production-name production) it (car (production-text production)))))
                                 (close error-string-stream)
@@ -962,9 +978,10 @@
                                                       :output (procedural-rhst prod)))))
                             (production-actions production)))))
                    (#\*
-                    (cond ((null definition)
+                    (cond  ; an empty mod-request should be treated just like a full one now
+                           ; ((null definition)
                            ;; not really allowed, but do these even get through?
-                           )
+                           ;)
                           ((= (length definition) 1)
                            (push-last 
                             (lambda () 
@@ -1005,16 +1022,50 @@
                                                       :output (procedural-rhst prod)))))
                             (production-actions production)))))
                    (#\@
-                    (push-last 
-                     (lambda () 
-                       (schedule-overwrite-buffer-chunk target
-                                                        (replace-variables (first definition) (production-bindings production))
-                                                        0
-                                                        :time-in-ms t
+                    (cond ((null definition) 
+                           (push-last 
+                            (lambda () 
+                              (schedule-event-now 'erase-buffer 
+                                                  :params (list target)
+                                                  :module 'procedural
+                                                  :priority 90
+                                                  :output (procedural-rhst prod)))
+                            (production-actions production)))
+                          
+                          ((= (length definition) 1)
+                           (push-last 
+                            (lambda () 
+                              (schedule-overwrite-buffer-chunk target
+                                                               (replace-variables (first definition) (production-bindings production))
+                                                               0
+                                                               :time-in-ms t
+                                                               :module 'procedural
+                                                               :priority 90
+                                                               :output (procedural-rhst prod)))
+                            (production-actions production)))
+                          (t
+                           (push-last 
+                            (lambda () 
+                              (multiple-value-bind (spec extended)
+                                  (instantiate-chunk-spec spec (production-bindings production))
+                                (let ((dummy-chunk (car (define-chunks-fct (list (chunk-spec-to-chunk-def spec))))))
+                                  (schedule-overwrite-buffer-chunk target dummy-chunk 0
+                                                                   :time-in-ms t
+                                                                   :module 'procedural
+                                                                   :priority 90
+                                                                   :output (procedural-rhst prod))
+                                  (when extended
+                                    (schedule-event-now 'extend-buffer-chunk
                                                         :module 'procedural
-                                                        :priority 90
+                                                        :priority 91
+                                                        :params (list target)
                                                         :output (procedural-rhst prod)))
-                     (production-actions production)))
+                                  (schedule-event-now 'delete-chunk-fct 
+                                                      :module 'procedural
+                                                      :params (list dummy-chunk)
+                                                      :priority 89
+                                                      :output nil))))
+                            (production-actions production)))))
                    (#\-
                     (push-last 
                      (lambda () 
@@ -1333,9 +1384,9 @@
                           (push-last end warn-indices))))
                    (if (= (length starts) (length ends))
                        (dolist (x (pairlis starts ends))
-                         (format *error-output* "~a~%" (subseq warn-text (car x) (+ 2 (cdr x)))))
+                         (finish-format *error-output* "~a~%" (subseq warn-text (car x) (+ 2 (cdr x)))))
                      (progn 
-                       (format *error-output* warn-text)))))))
+                       (finish-format *error-output* warn-text)))))))
            
            (when (and (procedural-style-warnings prod) (procedural-style-check prod)
                       (not (procedural-delay-tree prod)))
@@ -1487,17 +1538,42 @@
                       (bad-action-exit (format nil "Invalid - buffer command: ~s" seg))))
                    
                    (#\@ ;; now this is the specific overwrite action instead of =buffer> <chunk>
-                    (if (= (length (production-statement-definition statement)) 1)
-                        (let ((chunk? (first (production-statement-definition statement))))
-                          (if (or (chunk-spec-variable-p chunk?) (chunk-p-fct chunk?))
-                              (push-last statement actions)
-                            (bad-action-exit (format nil "Invalid overwrite action: ~s.  Must provide a variable or chunk name." seg))))
-                      (bad-action-exit (format nil "Invalid overwrite action: ~s.  Must have a single parameter." seg))))
+                    (cond ;; an erase instead of overwrite for empty case now
+                          ((= (length (production-statement-definition statement)) 0) ;; empty operation
+                           (setf (production-statement-spec statement) (define-chunk-spec isa chunk))
+                           (push-last statement actions))
+                          ;; the indirect overwrite situation (the only option prior to 7.0.2)
+                          ((= (length (production-statement-definition statement)) 1)
+                           (let ((chunk? (first (production-statement-definition statement))))
+                             (if (or (chunk-spec-variable-p chunk?) (chunk-p-fct chunk?))
+                                 (push-last statement actions)
+                               (bad-action-exit (format nil "Invalid overwrite action: ~s.  Must provide a variable or chunk name." seg)))))
+                          (t ;; now allow this for an overwrite too!
+                           (multiple-value-bind (spec slots)
+                             (define-chunk-spec-fct (production-statement-definition statement) t nil)
+                           (if spec
+                               (if (zerop (act-r-chunk-spec-request-param-slots spec))
+                                   (progn 
+                                     (when slots
+                                       (let ((extended-slots (remove-if 'listp slots))
+                                             (invalid-type-slots (remove-if-not 'listp slots)))
+                                         (when extended-slots
+                                           (model-warning "Production ~s uses previously undefined slots ~s." p-name extended-slots))
+                                         (dolist (x invalid-type-slots)
+                                           (model-warning "Production ~s action has invalid slot ~s for type ~s." p-name (third x) (second x))))
+                                       
+                                       (dolist (x slots) (pushnew x new-slots)))
+                                     
+                                     (setf (production-statement-spec statement) spec)
+                                     (push-last statement actions))
+                                 (bad-action-exit (format nil "Request parameters used in overwrite action ~s." seg)))
+                             (bad-action-exit (format nil "Invalid buffer overwrite ~s." seg)))))))
 
                    ((#\= #\*)  ;; production modifications and module modifications 
                                ;; have the same requirements and allow the same syntax
-                               ;; except that an empty * is not allowed only an empty
-                               ;; = can be used to avoid strict harvesting
+                               ;; Now allow an empty * as well as an empty =, but
+                               ;; the * will still go to the module so could do more
+                               ;; than just avoid strict harvesting
                     
                     ;; must test buffer on LHS
                     (unless (or (find-if (lambda (x)
@@ -1519,12 +1595,9 @@
                                               conditions)))
                       (bad-action-exit (format nil "Buffer modification action for untested buffer ~s." seg)))
                     
-                    (cond ((= (length (production-statement-definition statement)) 0) ;; empty =buffer operation
-                           (if (eql #\= (production-statement-op statement))
-                               (progn
-                                 (setf (production-statement-spec statement) (define-chunk-spec isa chunk))
-                                 (push-last statement actions))
-                             (bad-action-exit (format nil "Modification request ~s requires some modification." (car seg)))))
+                    (cond ((= (length (production-statement-definition statement)) 0) ;; empty operation
+                           (setf (production-statement-spec statement) (define-chunk-spec isa chunk))
+                           (push-last statement actions))
                           ;; this is not an overwrite anymore!
                           ((= (length (production-statement-definition statement)) 1)
                            (let ((chunk? (first (production-statement-definition statement))))

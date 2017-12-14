@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : conflict-tree.lisp
-;;; Version     : 1.0
+;;; Version     : 2.1
 ;;; 
 ;;; Description : Code for creating and searching a simple decision tree of
 ;;;               production conditions.
@@ -56,6 +56,13 @@
 ;;;            :   the isa-node processing methods.
 ;;; 2014.05.30 Dan
 ;;;            : * Also commented out the isa condition in split-productions-with-condition.
+;;; 2016.07.05 Dan [2.1]
+;;;            : * Add-production-to-tree removes the isa conditions before 
+;;;            :   passing things to add-to-tree.
+;;;            : * When adding a new node for a new production being added check
+;;;            :   the condition added at the leaf with the current productions 
+;;;            :   at that leaf since previously it just pushed them to all 
+;;;            :   branches.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -94,7 +101,7 @@
 ;;;     :terminal - count of only terminal nodes (leaves)
 ;;;     :non-empty - number of leaf nodes with 1 or more productions that
 ;;;                  are valid
-;;;     :sets - the number of different sets of productions found at in the
+;;;     :sets - the number of different sets of productions found in the
 ;;;             non-empty leaf nodes
 ;;;     :average-set - the mean size of non-empty sets
 ;;;     :largest-set - the size of the largest set
@@ -468,11 +475,11 @@
     
     (if (binary-test-node-p new-node)
         (progn
-          (setf (binary-test-node-true new-node) (make-leaf-node :parent new-node :branch t :valid (copy-list (conflict-node-valid node))))
-          (setf (binary-test-node-false new-node) (make-leaf-node :parent new-node :branch nil :valid (copy-list (conflict-node-valid node))))
+          (setf (binary-test-node-true new-node) (make-leaf-node :parent new-node :branch t ))
+          (setf (binary-test-node-false new-node) (make-leaf-node :parent new-node :branch nil ))
           )
       (progn
-        (let ((other-tree (make-leaf-node :parent new-node :branch :other :valid (copy-list (conflict-node-valid node)))))
+        (let ((other-tree (make-leaf-node :parent new-node :branch :other)))
           (setf (gethash :other (wide-test-node-children new-node)) other-tree))))
     
     
@@ -489,7 +496,17 @@
                                
     ;; now call the add code for this new-node
     
-    (add-to-tree new-node conditions production)))
+    (add-to-tree new-node conditions production)
+    
+    ;; then add the current node's valid productions based on whether they have the
+    ;; same condition or not
+    
+    (dolist (p-name (conflict-node-valid node))
+      
+      (let* ((p (get-production p-name)) 
+             (c (or (find (car conditions) (production-constants p) :test 'tree-condition-equal)
+                    (find (car conditions) (production-implicit p) :test 'tree-condition-equal))))
+        (add-to-tree new-node (when c (list c)) p-name)))))
 
 
 
@@ -704,7 +721,9 @@
 
 (defun add-production-to-tree (p procedural)
   (add-to-tree (procedural-conflict-tree procedural) 
-               (remove-duplicates (append (production-constants p) (production-implicit p)) :test 'cr-condition-equal) 
+               (remove-if (lambda (x)
+                            (eq (cr-condition-type x) 'isa))
+                          (remove-duplicates (append (production-constants p) (production-implicit p)) :test 'cr-condition-equal))
                (production-name p)))
 
 (defun remove-production-from-tree (p procedural)

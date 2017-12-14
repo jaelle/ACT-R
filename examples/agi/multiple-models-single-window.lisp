@@ -5,7 +5,10 @@
 
 ;;; To run the example call the function run-it
 ;;; providing the optional parameter as t will
-;;; make the window visible (if possible).
+;;; make the window visible (if possible), and
+;;; for the visible virtual windows shown through
+;;; the ACT-R Environment each model will have
+;;; a different color fixation ring shown.
 
 
 (clear-all)
@@ -37,10 +40,9 @@
 
     
 (define-model model-1
-  (sgp :v t :show-focus t)
+  (sgp :v t :show-focus red)
   (p attend
      =visual-location>
-       isa visual-location
      ?visual>
        state free
      ==>
@@ -60,12 +62,11 @@
        key =value))                      
 
 (define-model model-2
-  (sgp :v t :show-focus t)
+  (sgp :v t :show-focus blue)
   
   (set-visloc-default isa visual-location screen-x highest)
   (p attend
      =visual-location>
-       isa visual-location
      ?visual>
        state free
      ==>

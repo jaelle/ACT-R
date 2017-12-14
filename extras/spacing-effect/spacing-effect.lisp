@@ -38,6 +38,8 @@
 ;;;             : * Updated since DM uses millisecond times internally now.
 ;;; 2011.04.28 Dan
 ;;;             : * Suppress warnings about extending chunks at initial load.
+;;; 2016.03.14 Dan
+;;;             : * Added the provide so that it works well with require-extra.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -81,7 +83,7 @@
 ;;;
 ;;; Because this was never actually implemented in ACT-R before, I asked Phil 
 ;;; which activation to use for m in the general case. His thoughts were that 
-;;; it should only be baseed on the history of use of the chunk. That suggests 
+;;; it should only be based on the history of use of the chunk. That suggests 
 ;;; using only the base level computation plus any permanent noise present.  
 ;;; Thus, spreading activation, partial matching, and transient noise should 
 ;;; not be considered for this.
@@ -406,6 +408,9 @@ Chunk G has an activation of: -2.649625
 
 (0.5 0.5 0.5 0.5)
 |#
+
+
+(provide "spacing-effect")
 
                          
 #|

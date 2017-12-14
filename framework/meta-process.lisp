@@ -137,6 +137,9 @@
 ;;;             :   because just adjusting the units-per-second doesn't quite
 ;;;             :   work for going faster than real time with the default slack
 ;;;             :   hook.
+;;; 2016.03.04 Dan 
+;;;             : * mp-print-versions now uses *actr-architecture-version* to 
+;;;             :   get the main version info.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -379,7 +382,7 @@
      events)))
      
 (defun mp-print-versions ()
-  (format t "ACT-R ~a Version Information:~%~va: ~10a ~a~%" *actr-major-version-string*
+  (format t "ACT-R ~a Version Information:~%~va: ~10a ~a~%" *actr-architecture-version*
     (max (max-module-name-length) 10)
     "Software"
     (meta-p-version (gethash 'default (mps-table *meta-processes*)))

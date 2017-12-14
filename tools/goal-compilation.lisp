@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : goal-compilation.lisp
-;;; Version     : 2.0
+;;; Version     : 3.0
 ;;; 
 ;;; Description : Production compilation GOAL style definition.
 ;;; 
@@ -53,6 +53,15 @@
 ;;; 2015.08.17 Dan
 ;;;             : * The last update actually broke things for the case where
 ;;;             :   there is no condition in c1 and this fixes that.
+;;; 2016.08.05 Dan [3.0]
+;;;             : * Updated the compilation type definition with one that was
+;;;             :   created automatically by build-compilation-type-file from the
+;;;             :   new spreadsheet that better handles "safe" compilation based
+;;;             :   on whether the buffer is strict harvested or not.  Also added
+;;;             :   some cases which should have been allowed but weren't where
+;;;             :   an = action with a preceeding * can be put together into a *.
+;;;             : * Added the code necessary to deal with the new cases and the 
+;;;             :   new test functions.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -326,16 +335,20 @@
       ((9 40)
        (list (awhen (buffer-condition-union c1 c2 (if a1= a1= a1*)) 
                     (list it))
-             (append (cond ((or a1= a2=) ;; if there's at least one = union those                             
-                            (awhen (buffer=-union a1= a2=) 
-                                   (list it)))
-                           ((or a1* a2*) ;; if there's at least one * union those
-                            (awhen (buffer=-union a1* a2*) 
-                                   (list it)))
-                           (t ;; can't have a mix of = and * so just ignore otherwise
-                            nil)) 
-                     (when a2+ 
-                       (list a2+))))))))
+             (append 
+              (cond ((and a1* a2=)
+                     (awhen (buffer=-union a1* a2=)
+                            (list it)))
+                    ((or a1= a2=) ;; if there's at least one = union those                             
+                     (awhen (buffer=-union a1= a2=) 
+                            (list it)))
+                    ((or a1* a2*) ;; if there's at least one * union those
+                     (awhen (buffer=-union a1* a2*) 
+                            (list it)))
+                    
+                    (t nil))
+              (when a2+ 
+                (list a2+))))))))
 
 
 (defun CHECK-GOAL-CONSISTENCY (buffer module p1 p2)
@@ -400,9 +413,24 @@
   (not (recursive-find (intern (concatenate 'string "=" (symbol-name buffer)))
                        (second (production-standard-rep p2)))))
 
+
+(defun NO-GOAL-HARVESTING (buffer p1 p2)
+  (declare (ignore p1 p2))
+  (find buffer (no-output (car (sgp :do-not-harvest)))))
+
+(defun G-B-C1 (buffer p1 p2)
+  (and (no-rhs-goal-ref buffer p1 p2) (no-goal-harvesting buffer p1 p2)))
+
 (defun goal-reason (p1-index p2-index failed-function)
-  (if (and failed-function (eql failed-function 'no-rhs-goal-ref))
-      "the buffer variable cannot be used in the actions of the second production if there is a request in the first production."
+  (if failed-function
+      (cond ((eql failed-function 'no-rhs-goal-ref)
+             "the buffer variable cannot be used in the actions of the second production if there is a request in the first production.")
+            ((eql failed-function 'no-goal-harvesting)
+             "the buffer is being strict harvested.")
+            ((eql failed-function 'g-b-c1)
+             "either the buffer is being strict harvested or the buffer variable is used in the actions of the second production.")
+            (t
+             (format nil "unknown reason ~s" failed-function)))
     (case p1-index
       ((2 6 10 11 14 15 42 43 46 47)
        "the buffer is explicitly cleared in the first production")
@@ -426,27 +454,31 @@
              "one production makes a modification and the other makes a modification request"))))))))
 
 
+
 (define-compilation-type GOAL ((44 40 NO-RHS-GOAL-REF)
-                               
-                               (44 8 NO-RHS-GOAL-REF) (44 0 T)
-                               (40 44 T) (40 40 T) (40 12 T) (40 8 T)
-                               (40 4 T) (40 0 T)
-                               (13 40 NO-RHS-GOAL-REF)
-                               (13 9 NO-RHS-GOAL-REF)
-                               (13 8 NO-RHS-GOAL-REF) (13 0 T)
-                               (12 40 NO-RHS-GOAL-REF)
-                               (12 9 NO-RHS-GOAL-REF)
-                               (12 8 NO-RHS-GOAL-REF) (12 0 T) (9 13 T)
-                               (9 12 T) (9 9 T) (9 8 T) (9 4 T) (9 0 T)
-                               (8 44 T) (8 40 T) (8 13 T) (8 12 T)
-                               (8 9 T) (8 8 T) (8 4 T) (8 0 T)
+                               (44 9 NO-RHS-GOAL-REF) (44 8 G-B-C1)
+                               (44 0 T) (40 44 T) (40 40 T) (40 13 T)
+                               (40 12 T) (40 9 T)
+                               (40 8 NO-GOAL-HARVESTING) (40 4 T)
+                               (40 0 T) (13 40 NO-RHS-GOAL-REF)
+                               (13 9 NO-RHS-GOAL-REF) (13 8 G-B-C1)
+                               (13 0 T) (12 40 NO-RHS-GOAL-REF)
+                               (12 9 NO-RHS-GOAL-REF) (12 8 G-B-C1)
+                               (12 0 T) (9 13 T) (9 12 T) (9 9 T)
+                               (9 8 NO-GOAL-HARVESTING) (9 4 T) (9 0 T)
+                               (8 44 NO-GOAL-HARVESTING)
+                               (8 40 NO-GOAL-HARVESTING)
+                               (8 13 NO-GOAL-HARVESTING)
+                               (8 12 NO-GOAL-HARVESTING)
+                               (8 9 NO-GOAL-HARVESTING)
+                               (8 8 NO-GOAL-HARVESTING) (8 4 T) (8 0 T)
                                (4 40 NO-RHS-GOAL-REF)
-                               (4 9 NO-RHS-GOAL-REF)
-                               (4 8 NO-RHS-GOAL-REF) (4 0 T) (0 44 T)
-                               (0 40 T) (0 13 T) (0 12 T) (0 9 T)
-                               (0 8 T)
-                               (0 4 T))
-  (GOAL) MAP-GOAL-BUFFER COMPOSE-GOAL-BUFFER CHECK-GOAL-CONSISTENCY PRE-INSTANTIATE-GOAL NIL goal-reason)
+                               (4 9 NO-RHS-GOAL-REF) (4 8 G-B-C1)
+                               (4 0 T) (0 44 T) (0 40 T) (0 13 T)
+                               (0 12 T) (0 9 T) (0 8 T)
+                               (0 4 T)) 
+  (GOAL) MAP-GOAL-BUFFER COMPOSE-GOAL-BUFFER CHECK-GOAL-CONSISTENCY PRE-INSTANTIATE-GOAL NIL GOAL-REASON)
+
 
 #|
 This library is free software; you can redistribute it and/or

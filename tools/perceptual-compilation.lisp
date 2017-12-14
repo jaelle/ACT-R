@@ -29,6 +29,10 @@
 ;;;             : * Added the whynot reason function.
 ;;; 2014.05.07 Dan [2.0]
 ;;;             : * Start of conversion to typeless chunks.
+;;; 2016.11.18 Dan
+;;;             : * When the buffer is strict harvested in p1 (8 or 24) and p2 has
+;;;             :   a query for buffer empty (16 or 20) then drop that buffer
+;;;             :   empty query from the composed production.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -55,7 +59,9 @@
   ;;   If the first production tests the buffer but doesn't make
   ;;      any queries or requests (8)
   ;;      any = condition in the first is used along with any 
-  ;;      query from the second and the action of the second
+  ;;      query from the second and the action of the second except that 
+  ;;      if the buffer is strict harvested a buffer empty query from p2 is dropped
+  ;;
   ;;   If the first a query and no request (16, 24)
   ;;      any = condition in either (there can be at most 1) is used 
   ;;      along with the query from the first and the action
@@ -95,8 +101,16 @@
        (list (append 
               (when c1 
                 (list c1)) 
-              (when q2 
-                (list q2)))
+              (if q2 
+                  (if (find buffer (no-output (car (sgp :do-not-harvest))))
+                      (list q2)
+                    ;; strict harvested so need to ignore a buffer empty query from p2
+                    (progn
+                      (setf (second q2) (remove '(= buffer empty) (second q2) :test 'equalp))
+                      (if (second q2)
+                          (list q2)
+                        nil)))
+                  nil))
              (when a2+ 
                (list a2+))))
       ((16 24)

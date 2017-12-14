@@ -12,7 +12,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Filename    : emma.lisp
-;;; Version     : 7.0
+;;; Version     : 7.1
 ;;;
 ;;; Description : Implementation of Dario Salvucci's EMMA system for eye
 ;;;             : movements based on subclassing the Vision Module and making
@@ -224,6 +224,18 @@
 ;;;             :   the standard vision module to mark the request done since the
 ;;;             :   current module's request function is still called which sets
 ;;;             :   the last request slot of the module.
+;;; 2016.03.14 Dan
+;;;             : * Added the provide at the bottom for use with require-extra.
+;;; 2016.07.08 Dan [7.1]
+;;;             : * Added the new :tracking-clear parameter from the vision module.
+;;; 2016.07.20 Dan
+;;;             : * Updated things to use set-current-marker and clof where it was
+;;;             :   taking (xy-loc current-marker) to deal with potentially 
+;;;             :   deleted feature chunk issues.
+;;;             : * Update encoding-complete and all the calls to it because it
+;;;             :   takes an extra parameter for location vector.
+;;;             : * Updated the calls to get-obj-at-location since it also takes
+;;;             :   the vector now too.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -388,7 +400,7 @@
       
       (setf (attend-failure eye-mod) nil)  ;;; clear the failure indicator     
       
-      (setf (current-marker eye-mod) location)
+      (set-current-marker eye-mod location)
 ;;;
 ;;;   mjs delete preparation-complete from event queue if one is outstanding
 ;;;
@@ -400,7 +412,7 @@
       
       
 ;;;   emma code
-      (let ((return-obj (get-obj-at-location eye-mod location scale)))
+      (let ((return-obj (get-obj-at-location eye-mod location (clof eye-mod) scale)))
         (if return-obj
           (let* ((start-loc (next-destination eye-mod))
                  (end-loc (xy-loc location eye-mod))
@@ -434,10 +446,12 @@
 ;;;             : Vision Module, but it also checks whether the target of
 ;;;             : the attention shift is still there.
 
-(defmethod encoding-complete ((eye-mod emma-vis-mod) loc scale &key (requested t))
+(defmethod encoding-complete ((eye-mod emma-vis-mod) loc position scale &key (requested t))
   (declare (symbol scale))
   (setf (moving-attention eye-mod) NIL)
   (change-state eye-mod  :proc 'FREE)
+  
+  (set-current-marker eye-mod loc position)
   
   (complete-request (last-visual-request eye-mod))
   
@@ -445,7 +459,7 @@
          (if (and (shift-target eye-mod)
                   (object-present-p eye-mod (shift-target eye-mod)))
              (shift-target eye-mod)
-           (get-obj-at-location eye-mod loc scale))))
+           (get-obj-at-location eye-mod loc position scale))))
     (unless return-obj
       (clear-attended eye-mod)
       (set-buffer-failure 'visual :ignore-if-full t :requested requested)
@@ -462,9 +476,12 @@
 ;;;             : attended location changes, there's some updating to do
 ;;;             : and an attention shift to the new object, if any.
 
+
+
+
 (defmethod update-attended-loc ((eye-mod emma-vis-mod))
   ;; if we're tracking or moving around, ignore this 
-  (when (or (tracked-obj eye-mod) (moving-attention eye-mod) 
+  (when (or (tracked-obj-last-feat eye-mod) (moving-attention eye-mod) 
             (eq 'BUSY (exec-s eye-mod)))
     (return-from update-attended-loc nil))
   ;; when do we update?
@@ -476,7 +493,11 @@
             (and (current-marker eye-mod)
                  (null (currently-attended eye-mod))
                  (within-move eye-mod (xy-loc (current-marker eye-mod) eye-mod))))
-            
+    
+    ;; Differs from vision module because there it goes directly to
+    ;; the encoding-complete, but need to deal with eye position 
+    ;; here first.
+    
         (schedule-event-now 'move-attention  ;;;mjs   
                                  :params (list 
                                             eye-mod
@@ -534,7 +555,7 @@
                               :time-in-ms t
                               :destination :vision
                               :module :vision
-                              :params`(,(current-marker eye-mod) ,(last-scale eye-mod))
+                              :params`(,(current-marker eye-mod) ,(clof eye-mod) ,(last-scale eye-mod))
                               :output 'medium
                               :details (concatenate 'string "Encoding-Complete " (symbol-name (current-marker eye-mod))))
 )))
@@ -573,7 +594,7 @@
   (when (and (moving-attention eye-mod)
              (eq trgt (moving-attention eye-mod)))
     (let* ((start-loc (eye-loc eye-mod))
-           (end-loc (xy-loc (current-marker eye-mod) eye-mod))
+           (end-loc (clof eye-mod))
            (r-theta (compute-saccade-r-theta start-loc end-loc))
            (new-duration
             (* (recog-time eye-mod (shift-target eye-mod) r-theta)
@@ -1157,7 +1178,11 @@ object, which is used to compute the recognition time."))
      :default-value T
      :warning "T or NIL"
      :documentation "Whether proc-display should delete and unintern the name of old chunks that were in the visicon")
-   
+   (define-parameter :tracking-clear
+     :valid-test 'tornil
+     :default-value t
+     :warning "T or NIL"
+     :documentation "Whether a tracking failure clears the currently attended location")
  
    (define-parameter :viewing-distance :owner nil)
    (define-parameter :pixels-per-inch :owner nil)
@@ -1190,7 +1215,7 @@ object, which is used to compute the recognition time."))
 
    )
   :warning 'warn-vision
-  :version "7.0-emma"
+  :version "7.1-emma"
   :documentation "Vision-module with EMMA addition"
   :creation 'create-emma-module 
   :reset 'reset-emma-module 
@@ -1198,3 +1223,6 @@ object, which is used to compute the recognition time."))
   :request 'pm-module-request
   :params 'params-emma-module
 )                 
+
+
+(provide "emma")

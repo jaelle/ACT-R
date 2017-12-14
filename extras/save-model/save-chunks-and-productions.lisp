@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : save-chunks-and-productions.lisp
-;;; Version     : 2.0a1
+;;; Version     : 3.0a1
 ;;; 
 ;;; Description : Saves a model's declarative and procedural components to a file
 ;;;             : which can be loaded later as a model.
@@ -39,6 +39,20 @@
 ;;;             : * More fixes to work right with the new chunk mechanism.
 ;;;             : * Actually create and write out a setting for any chunks that
 ;;;             :   are in buffers now.
+;;; 2015.03.23 Dan [3.0a1]
+;;;             : * Create the default chunk-type list at load time in the context
+;;;             :   of a dummy meta-process so that it has the possibility of
+;;;             :   working to save a model in a multi-model situation within a
+;;;             :   with-model.
+;;;             : * Since I've got a dummy model at that point set the critical
+;;;             :   parameter default values based on that model instead of to
+;;;             :   fixed values.
+;;;             : * Remove some of the ACT-R 6.1 specific code that dealt with
+;;;             :   backwards compatibility.
+;;;             : * Save chunk-type slot default values if they exist.
+;;; 2015.03.24 Dan
+;;;             : * Fixed a bug in the *default-chunk-type* definition for
+;;;             :   how it was setting the *critical-params*.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -179,9 +193,21 @@ PROCEDURAL module
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
 
-(defparameter *critical-params* '((:MD -1.0) (:RT 0.0) (:LE 1.0) (:MS 0.0) (:MP NIL) (:PAS NIL) (:MAS NIL) (:ANS NIL)
-                                  (:BLC 0.0) (:LF 1.0) (:BLL NIL) (:ESC NIL) (:ER NIL) (:OL T) (:IU 0) (:UL NIL)
-                                  (:ALPHA 0.2) (:UT NIL) (:NU 0) (:EGS 0.0) (:EPL NIL) (:TT 2.0) (:DAT 0.05) (:PPM NIL)))
+(defvar *critical-params* '(:MD :RT :LE :MS :MP :PAS :MAS :ANS :BLC :LF 
+                            :BLL :ESC :ER :OL :IU :UL :ALPHA :UT :NU 
+                            :EGS :EPL :TT :DAT :PPM))
+
+(defvar *default-chunk-types*
+    (let ((dummy-name (gensym)))
+      (prog2
+        (define-meta-process-fct dummy-name)
+        (with-meta-process-eval dummy-name
+          (define-model dummy)
+          (setf *critical-params*
+            (mapcar (lambda (x) (list x (car (no-output (sgp-fct (list x)))))) *critical-params*))
+          (all-chunk-type-names))
+        (delete-meta-process-fct dummy-name))))
+             
 
 (defun pprint-save-chunk (chunk-name)
   (let ((chunk (get-chunk chunk-name)))
@@ -242,23 +268,19 @@ PROCEDURAL module
           ;;; out (the order from all-chunk-type-names is safe for any inherited types).
           ;;; Use the underlying chunk-type structure to make things easier.
           
-          (let* ((dummy-name (gensym))
-                 (default-types (prog2
-                                  (define-model-fct dummy-name nil)
-                                    (with-model-eval dummy-name
-                                      (all-chunk-type-names))
-                                  (delete-model-fct dummy-name)))
-                 (model-types (mapcar 'get-chunk-type (remove-if (lambda (x) (find x default-types)) (all-chunk-type-names)))))
+          (let ((model-types (mapcar 'get-chunk-type (remove-if (lambda (x) (find x *default-chunk-types*)) (all-chunk-type-names)))))
             
             (dolist (ct model-types)
               (aif (act-r-chunk-type-parents ct)
                    (command-output "(chunk-type (~a ~{(:include ~a)~}) ~@[~s~]" (act-r-chunk-type-name ct) it (act-r-chunk-type-documentation ct))
                    (command-output "(chunk-type ~a ~@[~s~]" (act-r-chunk-type-name ct) (act-r-chunk-type-documentation ct)))
               
-              (dolist (slot (act-r-chunk-type-slots ct))
-                ;; don't output the backward compatible slots because they're generated automatically
-                (let ((slot-name-string (symbol-name (chunk-type-slot-name slot))))
-                  (unless (and (>= (length slot-name-string) 22) (string-equal "ACT-R-6-BACKWARD-SLOT-" (subseq (symbol-name (chunk-type-slot-name slot)) 0 22)))
+              (let* ((defaults (chunk-spec-slot-spec (act-r-chunk-type-initial-spec ct)))
+                     (default-slot-names (mapcar 'second defaults)))
+                
+                (dolist (slot (act-r-chunk-type-slots ct))
+                  (if (find slot default-slot-names)
+                      (command-output "  (~s ~s)" slot (third (find slot defaults :key 'second)))
                     (command-output "  ~s" slot))))
               
               (command-output ")")))

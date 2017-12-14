@@ -1,8 +1,11 @@
 
 This directory contains an extension for the motor module.  To use this
-extension load the motor-extension.lisp file after loading the main ACT-R
-load file, or place that file into the modules directory of the actr6 
-hierarchy so that it gets compiled and loaded automatically.
+extension call (require-extra "extended-motor-actions") and placing that
+call into any model which needs this extension will ensure it gets 
+loaded.  Alternatively one can load the motor-extension.lisp file after 
+loading the main ACT-R load file, or place that file into the modules 
+directory of the actr7 hierarchy so that it gets compiled and loaded 
+automatically.
 
 This extension combines a few extensions which have been written for the
 motor module together in one file.  It replaces the default motor module

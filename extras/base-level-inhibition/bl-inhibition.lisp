@@ -33,13 +33,19 @@
 ;;; 2011.04.25 Dan
 ;;;             : * Updated because of the change to millisecond times being
 ;;;             :   recorded in DM parameters.
+;;; 2016.03.14 Dan
+;;;             : * Added the note about require-extra.
+;;; 2016.09.20 Dan
+;;;             : * Fixed a bug with how the monitoring of :activation-offsets
+;;;             :   checked whether the parameter was already set.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
-;;; To use this extension put this file into the modules directory before loading
-;;; the main ACT-R load file, or load it once after loading ACT-R and before defining
-;;; any models.
+;;; To use this extension call (require-extra "base-level-inhibition"), or to 
+;;; always have the extension available put this file into the modules directory 
+;;; before loading the main ACT-R load file.  You can also explicitly load it 
+;;; once after loading ACT-R and before defining any models.
 ;;;
 ;;; With this module added to the system chunk activations now have an additional
 ;;; term added to the equation when the :enable-inhibition parameter is set to t
@@ -107,7 +113,7 @@
            (:activation-offsets
             
             (unless (or (find 'bl-inhibition-term (cdr param))
-                        (find 'bl-inhibition-term (no-output (sgp :activation-offsets))))
+                        (find 'bl-inhibition-term (no-output (car (sgp :activation-offsets)))))
               (sgp :activation-offsets bl-inhibition-term)))))
         (t 
          (case param

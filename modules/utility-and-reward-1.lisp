@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : utility-and-reward-1.lisp
-;;; Version     : 3.0
+;;; Version     : 3.1
 ;;; 
 ;;; Description : The procedural utility computation functions and a module
 ;;;             : for handling the "reward" given to a production.
@@ -129,6 +129,17 @@
 ;;;             : * The learn-parameters function now updates the requests
 ;;;             :   stored in the history since the production has executed its
 ;;;             :   actions at that point.
+;;; 2015.10.14 Dan [3.1]
+;;;             : * Added a new production parameter available via spp :fixed-utility.
+;;;             :   It defaults to nil, but if set to t then utility learning is
+;;;             :   disabled for that production and its :u value will remain at
+;;;             :   whatever value is set with spp (it can be changed by spp even
+;;;             :   while marked as fixed).
+;;; 2016.03.09 Dan
+;;;             : * Allow a production to have its reward status turned off via
+;;;             :   spp, but track if that changes during a run and warn about
+;;;             :   it during compilation updating since reward for a compiled
+;;;             :   production is only set on inital creation.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; General:
 ;;;
@@ -267,6 +278,8 @@
 (extend-productions u :default-function get-default-u)
 (extend-productions at :default-function get-default-action-time)
 (extend-productions reward)
+(extend-productions fixed-utility)
+(extend-productions reward-changed)
 
 (unsuppress-extension-warnings)
 
@@ -353,43 +366,47 @@
                 (model-output " Utility updates with Reward = ~f   alpha = ~f" value  (utility-alpha u)))
               
               (dolist (item (utility-history u))
-                (let ((delta-t (ms->seconds (- (mp-time-ms) (utility-history-time item))))
-                      (name (utility-history-name item)))
-                       
-                  (if (eq ul t)
-                      
-                      (let* ((override (and (utility-reward-hook u) 
-                                            (funcall (utility-reward-hook u) name value delta-t)))
-                             (r (if (numberp override) override (- value delta-t))))
-                        
-                        (when (utility-trace u)
-                          (model-output "  Updating utility of production ~S" name)
-                          (model-output "   U(n-1) = ~f   R(n) = ~f [~:[~f - ~f seconds since selection~;from reward-hook function~]]" 
-                                        (production-u (utility-history-name item)) r override value delta-t))
-                        (linear-update-utility u name r)
-                        (when (utility-trace u)
-                          (model-output "   U(n) = ~f" (production-u name))))
+                (let ((name (utility-history-name item)))
+                  (if (production-fixed-utility name)
+                      (when (utility-trace u)
+                        (model-output "  Updating of production ~S skipped because it has a fixed utility" name))
                     
-                    (progn
-                      (setf (utility-history-requests item) (remove-if 'request-completed-p (utility-history-requests item)))
+                    (let ((delta-t (ms->seconds (- (mp-time-ms) (utility-history-time item)))))
                       
-                      (if (utility-history-requests item)
-                          (progn
-                            (push-last item keep)
-                            (when (utility-trace u)
-                              (model-output "  Updating of production ~S skipped because not complete" name)))
-                        
-                        (let* ((override (and (utility-reward-hook u) 
-                                              (funcall (utility-reward-hook u) name value delta-t)))
-                               (r (if (numberp override) override (- value delta-t))))
+                      (if (eq ul t)
                           
-                          (when (utility-trace u)
-                            (model-output "  Updating utility of production ~S" name)
-                            (model-output "   U(n-1) = ~f   R(n) = ~f [~:[~f - ~f seconds since selection~;from reward-hook function~]]" 
-                                          (production-u (utility-history-name item)) r override value delta-t))
-                          (linear-update-utility u name r)
-                          (when (utility-trace u)
-                            (model-output "   U(n) = ~f" (production-u name)))))))))
+                          (let* ((override (and (utility-reward-hook u) 
+                                                (funcall (utility-reward-hook u) name value delta-t)))
+                                 (r (if (numberp override) override (- value delta-t))))
+                            
+                            (when (utility-trace u)
+                              (model-output "  Updating utility of production ~S" name)
+                              (model-output "   U(n-1) = ~f   R(n) = ~f [~:[~f - ~f seconds since selection~;from reward-hook function~]]" 
+                                            (production-u (utility-history-name item)) r override value delta-t))
+                            (linear-update-utility u name r)
+                            (when (utility-trace u)
+                              (model-output "   U(n) = ~f" (production-u name))))
+                        
+                        (progn
+                          (setf (utility-history-requests item) (remove-if 'request-completed-p (utility-history-requests item)))
+                          
+                          (if (utility-history-requests item)
+                              (progn
+                                (push-last item keep)
+                                (when (utility-trace u)
+                                  (model-output "  Updating of production ~S skipped because not complete" name)))
+                            
+                            (let* ((override (and (utility-reward-hook u) 
+                                                  (funcall (utility-reward-hook u) name value delta-t)))
+                                   (r (if (numberp override) override (- value delta-t))))
+                              
+                              (when (utility-trace u)
+                                (model-output "  Updating utility of production ~S" name)
+                                (model-output "   U(n-1) = ~f   R(n) = ~f [~:[~f - ~f seconds since selection~;from reward-hook function~]]" 
+                                              (production-u (utility-history-name item)) r override value delta-t))
+                              (linear-update-utility u name r)
+                              (when (utility-trace u)
+                                (model-output "   U(n) = ~f" (production-u name)))))))))))
               
               (setf (utility-history u) keep))
           (print-warning "Trigger-reward can only be used if utility learning is enabled."))
@@ -446,8 +463,10 @@
 
 
 (defun update-utility-for-compiled-production (p3 p1 p2)
-  (declare (ignore p2))
   (let ((u (get-module utility)))
+    (when (or (production-reward-changed p1) (production-reward-changed p2))
+      (model-warning "Parent productions for ~s may now provide different rewards than they did when it was created." p3))
+    
     (when (and u (utility-ul u))
       
       (when (utility-trace u)
@@ -583,7 +602,7 @@
           :warning "a function or nil" 
           :documentation "Functions to call when there is a reward provided"))
   
-  :version "3.0" 
+  :version "3.1" 
   :documentation  "A module that computes production utilities"
     
   :creation (lambda (x) (declare (ignore x)) (make-utility))
@@ -617,6 +636,7 @@
                         (:u (production-u production-name))
                         (:at (ms->seconds (production-at production-name)))
                         (:reward (production-reward production-name))
+                        (:fixed-utility (production-fixed-utility production-name))
                         
                         (t (print-warning "NO PARAMETER ~A DEFINED FOR PRODUCTIONS." parameter)
                            :error)))
@@ -638,8 +658,8 @@
                   (when (and esc ul)
                     (if (numberp (production-reward production-name))
                         (command-output " :reward ~6,3F" (production-reward production-name))
-                      (command-output " :reward ~6@s" (production-reward production-name))))
-                  
+                      (command-output " :reward ~6@s" (production-reward production-name)))
+                    (command-output " :fixed-utility ~6@s" (production-fixed-utility production-name)))
                   production-name)))
           (t :error))))
 
@@ -708,13 +728,29 @@
                              (nonneg value)
                              "a positive number"))
              
-             (:reward
+             (:reward ;; can't use set-parameter because I need to test
+                      ;; the original value before setting it but the
+                      ;; housekeeping only occurs after
               (if ul
-                  (set-parameter production-reward :reward
-                                 (or (eq value t) (numberp value))
-                                 "a number or t")
+                  (cond ((or (null value) (eq value t) (numberp value))
+                         (unless (zerop (mp-time-ms))
+                           (let ((old (production-reward p)))
+                             (unless (eq value old)
+                               (setf (production-reward-changed p) t))))
+                         
+                         (setf (production-reward p) value)
+                         value)
+                        (t
+                         (print-warning
+                          "PARAMETER ~A CANNOT TAKE VALUE ~S BECAUSE IT MUST BE ~:@(~A~)."
+                          :reward value "a number, t, or nil")
+                         :error))
                 (print-warning "PARAMETER REWARD CAN ONLY BE SET WHEN UL IS T.")))
              
+             (:fixed-utility
+              (set-parameter production-fixed-utility :fixed-utility
+                             (or (eq value t) (null value))
+                             "T or nil"))
              (t
               (print-warning
                "NO PARAMETER ~A DEFINED FOR PRODUCTIONS." parameter)

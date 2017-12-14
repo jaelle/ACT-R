@@ -1,132 +1,117 @@
 
 global ptrace_array
 
-proc select_ptrace {} {
+proc select_ptrace {key current} {
 
-  if {[currently_selected_model] == "nil"} {
-    tk_messageBox -icon info -type ok -title "Production Selection History" -message "Tracing tools require a current model."
-  } else {
+  set win [toplevel [new_variable_name .ptrace]]
 
-    set win [toplevel [new_variable_name .ptrace]]
+  global $win.scale
+  global ptrace_array
 
-    global $win.scale
-    global ptrace_array
+  global $win.p_viewer
 
-    global $win.p_viewer
-    set $win.p_viewer 0
+  global $win.grid_state
+  global $win.c_height
+  global $win.c_width
 
-    set ptrace_array($win,0) 0
-    set ptrace_array($win,1) 0
+  global $win.label_offset
 
-    wm withdraw $win
-    record_new_window $win $win
+  set $win.p_viewer 0
 
-    wm geometry $win [get_configuration .ptrace $win]
+  set ptrace_array($win,0) 0
+  set ptrace_array($win,1) 0
+
+  wm withdraw $win
+
+  wm geometry $win [get_configuration .ptrace $win]
 
 
-    frame $win.frame -borderwidth 0  
+  frame $win.frame -borderwidth 0  
     
-    canvas $win.frame.canvas  \
+  canvas $win.frame.canvas  \
          -xscrollcommand "$win.frame.scrlx set" \
          -yscrollcommand "$win.frame.scrly set" \
          -width 900 -height 300 -scrollregion {0 0 900 300} -bg white
    
-    canvas $win.frame.canvas1  \
+  canvas $win.frame.canvas1  \
          -yscrollcommand "$win.frame.scrly set" \
          -width 150 -height 300 -scrollregion {0 0 150 300} -bg white
    
        
-    scrollbar $win.frame.scrlx \
+  scrollbar $win.frame.scrlx \
               -command "$win.frame.canvas xview" -orient horizontal
 
-    scrollbar $win.frame.scrly \
+  scrollbar $win.frame.scrly \
               -command "scroll_ptraces_canvas $win" -orient vertical
 
 
-    set $win.scale 1.0
+  set $win.scale 1.0
           
-    send_environment_cmd \
-      "create list-handler $win.frame.canvas $win.return \
-         (lambda (x) (declare (ignore x)) (no-output (sgp :save-p-history t)) nil) (reset) [send_model_name]"
+  button $win.update -command [list draw_p_trace $win $key $current] -text "Get history" -font button_font
 
-
-    bind $win.frame.canvas <Destroy> "remove_handler $win.frame.canvas"
-
-
-    button $win.update -command "draw_p_trace $win [send_model_name]" -text "Get history" -font button_font
-
-    label $win.text -font text_font  -textvariable $win.textvar
+  label $win.text -font text_font  -textvariable $win.textvar
   
-    set $win.textvar ""
+  set $win.textvar ""
 
-    label $win.notes -font text_font  -textvariable $win.notesvar -anchor nw
+  label $win.notes -font text_font  -textvariable $win.notesvar -anchor nw
   
-    set $win.notesvar ""
+  set $win.notesvar ""
 
-    button $win.grid -command "p_trace_grid $win" -text "Grid" -font button_font
+  button $win.grid -command "p_trace_grid $win" -text "Grid" -font button_font
 
-    button $win.zoom_in -command "p_trace_zoom_in $win" -text "+" -font button_font
+  button $win.zoom_in -command "p_trace_zoom_in $win" -text "+" -font button_font
 
-    button $win.zoom_out -command  "p_trace_zoom_out $win" -text "-" -font button_font
+  button $win.zoom_out -command  "p_trace_zoom_out $win" -text "-" -font button_font
 
-    button $win.save -command "save_phistory_trace $win" -text "Save 1P" -font button_font
-    button $win.save2 -command "save_phistory_trace_multi $win" -text "Save Multi." -font button_font
+  button $win.save -command "save_phistory_trace $win" -text "Save 1P" -font button_font
+  button $win.save2 -command "save_phistory_trace_multi $win" -text "Save Multi." -font button_font
 
 
-    # Add a checkbox to allow removing the empty columns to the tool
+  # Add a checkbox to allow removing the empty columns to the tool
 
-    checkbutton $win.check \
+  checkbutton $win.check \
                 -text "Hide empty columns" \
                 -font checkbox_font \
                 -variable $win.check_val \
-                -command "draw_p_trace $win [send_model_name]" \
+                -command [list draw_p_trace $win $key $current] \
                 -onvalue 1 -offvalue 0
 
+  set $win.scale 1.0
 
-    global $win.scale
-    set $win.scale 1.0
+  set $win.grid_state 1
 
-    global $win.grid_state
-    set $win.grid_state 1
-
-    global $win.c_height
-    global $win.c_width
-
-    global $win.label_offset
-
-    pack $win.frame.scrlx -side bottom -fill x
-    pack $win.frame.scrly -side right -fill y
-    pack $win.frame.canvas1 -side left -fill y
-    pack $win.frame.canvas -side left -fill both
+  pack $win.frame.scrlx -side bottom -fill x
+  pack $win.frame.scrly -side right -fill y
+  pack $win.frame.canvas1 -side left -fill y
+  pack $win.frame.canvas -side left -fill both
  
-    place $win.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0 -height -50
-    
+  place $win.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0 -height -50
 
-    place $win.update -x 0 -rely 1.0 -y -50 -width 85 -height 24
-    place $win.grid -x 85 -rely 1.0 -y -50 -width 60 -height 24
-    place $win.save -x 145 -rely 1.0 -y -50 -width 85 -height 24
-    place $win.notes -x 240 -rely 1.0 -y -50 -relwidth 1.0 -height 25
+  place $win.update -x 0 -rely 1.0 -y -50 -width 85 -height 24
+  place $win.grid -x 85 -rely 1.0 -y -50 -width 60 -height 24
+  place $win.save -x 145 -rely 1.0 -y -50 -width 85 -height 24
+  place $win.notes -x 240 -rely 1.0 -y -50 -relwidth 1.0 -height 25
 
-    place $win.text -x 0 -rely 1.0 -y -25 -width 85 -height 25
-    place $win.zoom_in -x 85 -rely 1.0 -y -25 -width 30 -height 24
-    place $win.zoom_out -x 115 -rely 1.0 -y -25 -width 30 -height 24
-    place $win.save2 -x 145 -rely 1.0 -y -25 -width 85 -height 24
-    place $win.check -x 230 -rely 1.0 -y -25 -width 175 -height 24
+  place $win.text -x 0 -rely 1.0 -y -25 -width 85 -height 25
+  place $win.zoom_in -x 85 -rely 1.0 -y -25 -width 30 -height 24
+  place $win.zoom_out -x 115 -rely 1.0 -y -25 -width 30 -height 24
+  place $win.save2 -x 145 -rely 1.0 -y -25 -width 85 -height 24
+  place $win.check -x 230 -rely 1.0 -y -25 -width 175 -height 24
 
-    wm deiconify $win
-  }
+  wm deiconify $win
+
+  return $win
 } 
 
 
 proc scroll_ptraces_canvas {win args} {
-
    set ignore ""
    eval [append ignore $win.frame.canvas " " yview " " $args]
    set ignore ""
    eval [append ignore $win.frame.canvas1 " " yview " " $args]
 }
 
-proc draw_p_trace {win model} {
+proc draw_p_trace {win key current} {
 
   global $win.return
 
@@ -169,101 +154,122 @@ proc draw_p_trace {win model} {
 
   set done 0
 
-  while {$done == 0} {
-             
   set $win.return ""
-                  
-  if $hide_empty {
-    send_environment_cmd "update [get_handler_name $win.frame.canvas] (lambda (x) (with-parameters (:draw-blank-columns nil) (production-history-chart-data x)))"
+
+  if $current {
+    send_environment_cmd "create list-handler $win.frame.canvas $win.return (lambda (x) (declare (ignore x)) (list 1)) nil $key"
   } else {
-    send_environment_cmd "update [get_handler_name $win.frame.canvas] production-history-chart-data"
+    send_environment_cmd "create list-handler $win.frame.canvas $win.return (lambda (x) (declare (ignore x)) (list 1)) nil"
   }
 
   wait_for_non_null $win.return
 
-  upvar $win.return result
+  while {$done == 0} {
+             
+    set $win.return ""
+                
+    if $hide_empty {
+      send_environment_cmd "update [get_handler_name $win.frame.canvas] (lambda (x) (declare (ignore x)) (production-history-chart-data nil '$key))"
+    } else {
+      send_environment_cmd "update [get_handler_name $win.frame.canvas] (lambda (x) (declare (ignore x)) (production-history-chart-data t '$key))"
+    }
 
-  foreach x $result {
-    switch [lindex $x 0] {
-      labels { 
-        set y $c_height
+    wait_for_non_null $win.return
+
+    upvar $win.return result
+
+    foreach x $result {
+      switch [lindex $x 0] {
+        labels { 
+          set y $c_height
         
-        foreach p [lrange $x 1 end] {
-          set box_name [new_variable_name box]
- 
-          $win.frame.canvas create text [expr $label_offset + 5] [expr $y + 5] -anchor nw -font text_font -text $p 
-  
-          $win.frame.canvas1 create text 5 $y -anchor nw -font text_font -text $p -tag $box_name
-          $win.frame.canvas1 create line 0 $y $n_width $y -width 1 -f gray
+          set count [lindex $x 1]
 
-          $win.frame.canvas1 bind $box_name <ButtonPress> "p_history_p_view $win $p $model"
+          for {set i 0} {$i < $count} {incr i} {
+
+            set n_index [expr $i + 2]
+            set t_index [expr $n_index + $count]
+
+            set box_name [new_variable_name box]
+ 
+            $win.frame.canvas create text [expr $label_offset + 5] [expr $y + 5] -anchor nw -font text_font -text [lindex $x $n_index] 
+  
+            $win.frame.canvas1 create text 5 $y -anchor nw -font text_font -text [lindex $x $n_index] -tag $box_name
+            $win.frame.canvas1 create line 0 $y $n_width $y -width 1 -f gray
+
+            $win.frame.canvas1 bind $box_name <ButtonPress> "p_history_p_view $win [lindex $x $n_index] {[lindex $x $t_index]}"
           
-          incr y $c_height
+            incr y $c_height
+          }
         }
-      }
 
-      colors {
+        colors {
           set colors [lrange $x 1 end]
-      }
+        }
 
-      reasons {
+        reasons {
           set reasons [lrange $x 1 end]
-      }
+        }
       
-      size { 
-       set t_height [lindex $x 1]
-       set c_height [lindex $x 2]
-       set n_width [lindex $x 3]
-       set c_width [lindex $x 4]
-       set t_width [lindex $x 5]
+        size { 
+          set t_height [lindex $x 1]
+          set c_height [lindex $x 2]
+          set n_width [lindex $x 3]
+          set c_width [lindex $x 4]
+          set t_width [lindex $x 5]
 
-       set label_offset [expr -$n_width]
+          set label_offset [expr -$n_width]
 
-       $win.frame.canvas configure -width $t_width -height $t_height
-       $win.frame.canvas1 configure -width $n_width -height $t_height
-       $win.frame.canvas1 configure -scrollregion "0 0 $n_width $t_height"
-       $win.frame.canvas configure -scrollregion "0 0 $t_width $t_height"
-      }
+          $win.frame.canvas configure -width $t_width -height $t_height
+          $win.frame.canvas1 configure -width $n_width -height $t_height
+          $win.frame.canvas1 configure -scrollregion "0 0 $n_width $t_height"
+          $win.frame.canvas configure -scrollregion "0 0 $t_width $t_height"
+        }
 
-      done {
-       set done 1
-      }
+        done {
+         set done 1
+        }
 
-      column {
+        column {
         
-        $win.frame.canvas create text [expr $x_display + ($c_width / 2)] 0 -anchor n -font graphic_trace_font -text [lindex $x 1] -tag zoom
+          $win.frame.canvas create text [expr $x_display + ($c_width / 2)] 0 -anchor n -font graphic_trace_font -text [lindex $x 1] -tag [list zoom [lindex $x 1]]
 
-        set y $c_height
+          set y $c_height
 
-        foreach {index value uofn} [lrange $x 2 end] {
+          foreach {index value uofn name} [lrange $x 2 end] {
 
-          set box_name [new_variable_name box]
+            set box_name [new_variable_name box]
  
-          $win.frame.canvas create rectangle $x_display $y [expr $x_display + $c_width] [expr $y + $c_height] -width 0 -fill [lindex $colors $index] -tag [list $box_name zoom]
+            $win.frame.canvas create rectangle $x_display $y [expr $x_display + $c_width] [expr $y + $c_height] -width 0 -fill [lindex $colors $index] -tag [list $box_name zoom]
   
-          switch $index {
+            switch $index {
               0 {
-               $win.frame.canvas bind $box_name <Enter> "set $win.notesvar \"Utility: $value U(n): $uofn\""
+                $win.frame.canvas bind $box_name <Enter> "set $win.notesvar \"Utility: $value U(n): $uofn\""
+                $win.frame.canvas bind $box_name <ButtonPress> "p_history_whynot_view $win $index $value $uofn $name [lindex $x 1]"
               }
               1 {
                 $win.frame.canvas bind $box_name <Enter> "set $win.notesvar \"Utility: $value U(n): $uofn\""
+                $win.frame.canvas bind $box_name <ButtonPress> "p_history_whynot_view $win $index $value $uofn $name [lindex $x 1]"
               }
               2 {
                 $win.frame.canvas bind $box_name <Enter> "set $win.notesvar {Whynot: [lindex $reasons $value]}"
+                $win.frame.canvas bind $box_name <ButtonPress> "p_history_whynot_view $win $index {[lindex $reasons $value]} {} $name [lindex $x 1]"
               }
+            }
+
+            $win.frame.canvas bind $box_name <Leave>  "set $win.notesvar \"\""
+
+
+            incr y $c_height
           }
 
-          $win.frame.canvas bind $box_name <Leave>  "set $win.notesvar \"\""
-          incr y $c_height
+          incr x_display $c_width
         }
-        incr x_display $c_width
       }
     }
   }
-  }
 
-  send_environment_cmd "update [get_handler_name $win.frame.canvas]  \
-         (lambda (x) (declare (ignore x)) (no-output (sgp :save-p-history t)) nil)"
+  remove_handler $win.frame.canvas
 
 
   for {set x 0} {$x < $t_width} {incr x $c_width} {
@@ -300,102 +306,109 @@ proc p_trace_zoom_out {win} {
    $win.frame.canvas scale zoom 0 0 0.5 1.0
    $win.frame.canvas configure -width [expr .5 * [$win.frame.canvas cget -width]]
    $win.frame.canvas configure -scrollregion "0 0 [$win.frame.canvas cget -width] [$win.frame.canvas cget -height]"
-  
-
-#   foreach x [$win.frame.canvas find withtag trace_text] {
-#      $win.frame.canvas itemconfigure $x -width [expr .5 * [$win.frame.canvas itemcget $x -width]]
-#   }
 }
 
 proc p_trace_zoom_in {win} {
 
-   global $win.scale
-   upvar $win.scale scale
+  global $win.scale
+  upvar $win.scale scale
 
-   if {$scale < 16} {
-      set scale [expr 2 * $scale]
+  if {$scale < 16} {
+    set scale [expr 2 * $scale]
 
-      $win.frame.canvas scale zoom 0 0 2.0 1.0
-   $win.frame.canvas configure -width [expr 2.0 * [$win.frame.canvas cget -width]]
-   $win.frame.canvas configure -scrollregion "0 0 [$win.frame.canvas cget -width] [$win.frame.canvas cget -height]"
-      
-#      foreach x [$win.frame.canvas find withtag trace_text] {
-#         $win.frame.canvas itemconfigure $x -width [expr 2 * [$win.frame.canvas itemcget $x -width]]
-#      }
-   }
+    $win.frame.canvas scale zoom 0 0 2.0 1.0
+    $win.frame.canvas configure -width [expr 2.0 * [$win.frame.canvas cget -width]]
+    $win.frame.canvas configure -scrollregion "0 0 [$win.frame.canvas cget -width] [$win.frame.canvas cget -height]"
+  }
 }
 
 
 proc p_trace_grid {win} {
 
-   global $win.grid_state
-   upvar $win.grid_state grid
+  global $win.grid_state
+  upvar $win.grid_state grid
 
-   if {$grid == ""} {
+  if {$grid == ""} {
     $win.frame.canvas itemconfigure grid -f black
     set grid black
-   } elseif {$grid == "vert"} {
+  } elseif {$grid == "vert"} {
     $win.frame.canvas itemconfigure grid -f ""
     set grid ""
-   } else {
+  } else {
     $win.frame.canvas itemconfigure grid_vert -f ""
     set grid vert
-   }
-
-#   foreach x [$win.frame.canvas find withtag trace_text] {
-#      $win.frame.canvas itemconfigure $x -width [expr .5 * [$win.frame.canvas itemcget $x -width]]
-#   }
-}
-
-
-
-proc p_history_p_view {win prod model} {
- 
-  global $win.p_viewer
-
-  upvar $win.p_viewer viewer
-
-  if {$viewer == 0 || [winfo exists $viewer] != 1} {
-
-    if {$model == "nil" || [set_currently_selected_model $model] != 0} {
-      set win [make_procedural_viewer]
-
-      set box "$win.list_frame.list_box"
-
-      global  $win.list_frame.list_box.var
-      wait_for_non_null $win.list_frame.list_box.var
-
-      set index [lsearch -exact [$box get 0 end] $prod] 
-
-      $box selection set $index
-
-      event generate $box <<ListboxSelect>>
-
-      set viewer $win
-    } else {
-      tk_messageBox -icon warning -title "No Model" \
-                    -message "Model $model is not currently defined so procedural viewer unavailable" -type ok
-    }
-
-  } else {
-    
-    wm deiconify $viewer
-    raise $viewer
-
-    set box "$viewer.list_frame.list_box"
-
-    set index [lsearch -exact [$box get 0 end] $prod] 
-
-    $box selection clear 0 end
-
-    event generate $box <<ListboxSelect>>
-
-    $box selection set $index
-
-    event generate $box <<ListboxSelect>>
   }
 }
 
+proc p_history_p_view {win name text} {
+
+  # make a new window 
+  set top [toplevel [new_variable_name ".p_history_p_view"]]
+
+  wm geometry $top [get_configuration .p_history_p_view $top]
+
+  wm title $top "[wm title $win] Production: $name"     
+
+  frame $top.frame -borderwidth 0  
+    
+  set text_box [text $top.frame.text -font text_font \
+                                     -yscrollcommand "$top.frame.scrl set" ]
+
+  $text_box insert 0.0 $text
+  
+  bind $text_box <1> {focus %W}
+
+  $text_box configure -state disabled
+
+  set scrl_bar [scrollbar $top.frame.scrl -command "$top.frame.text yview"]
+   
+  place $top.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0
+        
+  pack $scrl_bar -side right -fill y 
+  pack $text_box -side left -expand 1 -fill both
+ 
+}
+
+proc p_history_whynot_view {win which t1 t2 name time} {
+
+  # make a new window 
+  set top [toplevel [new_variable_name ".p_history_whynot_view"]]
+
+  wm geometry $top [get_configuration .p_history_whynot_view $top]
+
+  wm title $top "[wm title $win] Whynot Production: $name at time $time"     
+
+  frame $top.frame -borderwidth 0  
+    
+  set text_box [text $top.frame.text -font text_font \
+                                     -yscrollcommand "$top.frame.scrl set" ]
+
+  
+
+  switch $which {
+    0 {
+      $text_box insert 0.0 "Production $name Was selected at time $time\nUtility: $t1 U(n): $t2"
+    }
+    1 {
+      $text_box insert 0.0 "Production $name matched but was not selected at time $time\nUtility: $t1 U(n): $t2"
+    }
+    2 {
+      $text_box insert 0.0 "Production $name did not match at time $time\nWhynot: $t1"
+    }
+  }
+  
+  bind $text_box <1> {focus %W}
+
+  $text_box configure -state disabled
+
+  set scrl_bar [scrollbar $top.frame.scrl -command "$top.frame.text yview"]
+   
+  place $top.frame -x 0 -y 0 -relwidth 1.0 -relheight 1.0
+        
+  pack $scrl_bar -side right -fill y 
+  pack $text_box -side left -expand 1 -fill both
+ 
+}
 
 
 proc save_phistory_trace {win} {
@@ -500,8 +513,4 @@ proc phistory_StripPSComments {PSString} {
 
 
 
-button [control_panel_name].ptrace_button \
-       -command {select_ptrace} -text "Production History" -font button_font
-
-pack [control_panel_name].ptrace_button
-
+add_history_button select_ptrace "Production Grid" :save-p-history "Production history" right get-p-history-data default-save-history-info

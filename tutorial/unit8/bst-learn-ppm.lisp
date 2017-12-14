@@ -96,17 +96,18 @@
     (update-current-line)))
 
 (defun update-current-line ()
-  (when *current-line*
-    (remove-items-from-exp-window *current-line*))
-
-  (if (= *current-stick* *target*)
-      (progn
-        (setf *done* t) 
-        (setf *current-line* (add-line-to-exp-window (list 75 135) (list  (+ *target* 75) 135) :color 'blue))
-        (add-text-to-exp-window :x 180 :y 200 :width 50 :text "Done"))
-    (if (zerop *current-stick*)
-        (setf *current-line* nil)
-      (setf *current-line* (add-line-to-exp-window (list 75 135) (list (+ *current-stick* 75) 135) :color 'blue))))
+  (cond ((= *current-stick* *target*)
+         (setf *done* t) 
+         (modify-line-for-exp-window *current-line* (list 75 135) (list  (+ *target* 75) 135))
+         (add-text-to-exp-window :x 180 :y 200 :width 50 :text "Done"))
+        ((zerop *current-stick*)
+         (when *current-line*
+           (remove-items-from-exp-window *current-line*)
+           (setf *current-line* nil)))
+        (*current-line*
+          (modify-line-for-exp-window *current-line* (list 75 135) (list (+ *current-stick* 75) 135)))
+        (t
+         (setf *current-line* (add-line-to-exp-window (list 75 135) (list (+ *current-stick* 75) 135) :color 'blue))))
   
    (allow-event-manager *experiment-window*)
 

@@ -63,6 +63,15 @@
 ;;;             :   Should be a point size for the font, defaults to 12 and the
 ;;;             :   height and width are based on the ratios for the previous
 ;;;             :   defaults which were 10 high and 7 wide for 12 point.
+;;; 2016.06.08 Dan
+;;;             : * Allow the class in make-rpm-window to override visible-
+;;;             :   virtual-windows if it's a subtype of that class.
+;;;             : * Add the modify-*-for-rpm-window methods which just directly
+;;;             :   change the slots of the object since that's all a virtual
+;;;             :   item needs (the device code modifies the underlying feature
+;;;             :   chunks as needed).
+;;; 2016.06.09 Dan
+;;;             : * Properly change the action of a button in the modify.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -226,8 +235,8 @@
 
 (defun make-rpm-window (&key (visible nil) (class nil) (title "RPM Window") (width 100) (height 100) (x 0 ) (y 0))
   (if visible
-      (if (and (visible-virtuals-available?) (null class))
-          (make-instance 'visible-virtual-window :window-title title :width width :height height :x-pos x :y-pos y)
+      (if (and (visible-virtuals-available?) (or (null class) (subtypep class 'visible-virtual-window)))
+          (make-instance (if class class 'visible-virtual-window) :window-title title :width width :height height :x-pos x :y-pos y)
         (progn
           (print-warning "Cannot create a visible window.  Using a virtual window instead.")
           (make-instance 'rpm-virtual-window :window-title title :width width :height height :x-pos x :y-pos y)))
@@ -248,6 +257,24 @@
     :height height
     :width width
     :color color))
+
+(defmethod modify-button-for-rpm-window ((button-item button-vdi) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (action nil actionp))
+  "Modify a button item for the rpm window"
+  (when xp
+    (setf (x-pos button-item) x))
+  (when yp
+    (setf (y-pos button-item) y))
+  (when textp
+    (setf (dialog-item-text button-item) text))
+  (when heightp
+    (setf (height button-item) height))
+  (when widthp
+    (setf (width button-item) width))
+  (when colorp 
+    (setf (color button-item) color))
+  (when actionp
+    (setf (action-function button-item) action))
+  button-item)
 
 
 ;;; MAKE-STATIC-TEXT-FOR-RPM-WINDOW  [Method]
@@ -270,6 +297,26 @@
     :text-height (round font-size 12/10)
     :str-width-fct (let ((w (round font-size 12/7))) (lambda (str) (* (length str) w)))))
 
+(defmethod modify-text-for-rpm-window ((text-item static-text-vdi) &key (x nil xp) (y nil yp) (text nil textp) (height nil heightp) (width nil widthp) (color nil colorp) (font-size nil font-sizep))
+  "Modify a text item for the rpm window"
+  (when xp
+    (setf (x-pos text-item) x))
+  (when yp
+    (setf (y-pos text-item) y))
+  (when textp
+    (setf (dialog-item-text text-item) text))
+  (when heightp
+    (setf (height text-item) height))
+  (when widthp
+    (setf (width text-item) width))
+  (when font-sizep
+    (setf (text-height text-item) (round font-size 12/10))
+    (setf (str-width-fct text-item) (let ((w (round font-size 12/7))) (lambda (str) (* (length str) w)))))
+  (when colorp 
+    (setf (color text-item) color))
+  text-item)
+
+
 
 ;;; MAKE-LINE-FOR-RPM-WINDOW  [Method]
 ;;; Description : Build and return the appropriate liner object for the
@@ -286,6 +333,17 @@
     :width (first end-pt)
     :height (second end-pt)))
 
+(defmethod modify-line-for-rpm-window ((line v-liner) start-pt end-pt &key (color nil colorp))
+  (when start-pt
+    (setf (x-pos line) (first start-pt))
+    (setf (y-pos line) (second start-pt)))
+  (when end-pt
+    (setf (width line) (first end-pt))
+    (setf (height line) (second end-pt)))
+  (when colorp
+    (setf (color line) color))
+  line)
+    
 
 ;;; ALLOW-EVENT-MANAGER  [Method]
 ;;; Description : Call the system dependent event processing function. 

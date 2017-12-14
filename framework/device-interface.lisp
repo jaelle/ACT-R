@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : device-interface.lisp
-;;; Version     : 2.0
+;;; Version     : 2.1
 ;;; 
 ;;; Description : File for managing the device interface.
 ;;; 
@@ -230,6 +230,13 @@
 ;;;             : * Added press-key shortcuts for the keypad assuming that the
 ;;;             :   hand has been moved to it with hand-to-keypad or start-hand-
 ;;;             :   at-keypad.
+;;; 2016.04.04 Dan [2.1]
+;;;             : * Allow :show-focus to also take string and symbol values for
+;;;             :   true.  Those values MAY be used by the device to indicate
+;;;             :   a color for the fixation ring.
+;;; 2016.07.20 Dan
+;;;             : * Update-device now sends the clof value to device-update-attended-loc
+;;;             :   since the current-marker value may not be a chunk anymore.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -240,6 +247,7 @@
 (declaim (ftype (function (t) t) populate-loc-to-key-array))
 (declaim (ftype (function (t t) t) xy-loc))
 (declaim (ftype (function (t) t) current-marker))
+(declaim (ftype (function (t) t) clof))
 (declaim (ftype (function (t t) t) record-vis-loc-slots))
 
 ;;; unless it's MCL define the pixels-per-inch
@@ -454,7 +462,7 @@
           
           (unless (and past-marker-exists (eq marker past-marker))
             (if marker
-                (device-update-attended-loc (device devin) (xy-loc marker vis-m))
+                (device-update-attended-loc (device devin) (clof vis-m))
               (device-update-attended-loc (device devin) nil))
             (setf (last-visual-marker devin) (cons t marker)))))))
   (synch-mouse devin)
@@ -549,10 +557,10 @@
      :warning "T or NIL"
      :documentation "Should there be a visicon feature for the cursor?")
    (define-parameter :show-focus
-     :valid-test #'tornil 
+     :valid-test (lambda (x) (or (tornil x) (symbolp x) (stringp x)))
      :default-value nil
-     :warning "T or NIL"
-     :documentation "Show the focus ring on the GUI?")
+     :warning "T, NIL, a symbol, or string"
+     :documentation "Show the focus ring on the GUI?  T, a string, or symbol will enable, and some devices will use the value to indicate a color.")
    (define-parameter :viewing-distance
      :valid-test #'posnum 
      :default-value 15.0
@@ -590,7 +598,7 @@
      :default-value t
      :warning "T or NIL"
      :documentation "Whether or not to record all mouse position data"))
-  :version "2.0"
+  :version "2.1"
   :documentation "The device interface for a model"
   :creation #'(lambda (x)
                 (declare (ignore x))

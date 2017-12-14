@@ -41,6 +41,11 @@
 ;;;             : * Record the saved trace at the time in ms not seconds.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2016.02.12 Dan
+;;;             : * Upated with some changes that happened in dm and blending
+;;;             :   code.
+;;; 2016.02.26 Dan
+;;;             : * Fixed a potential bug with the blending code.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -276,6 +281,10 @@
                (print-warning "Invalid retrieval request.")
                (print-warning ":recently-retrieved parameter used more than once.")
                (setf (dm-busy dm) nil)
+               
+               ;; mark the request as completed
+               (complete-request (dm-pending-request dm))
+               
                (setf (last-request-invalid (dm-last-request dm)) :too-many)
                (return-from start-retrieval))
               ((not (or (eq '- (caar recent)) (eq '= (caar recent))))
@@ -283,6 +292,10 @@
                (print-warning ":recently-retrieved parameter's modifier can only be = or -.")
                (setf (dm-busy dm) nil)
                (setf (last-request-invalid (dm-last-request dm)) :bad-modifier)
+              
+               ;; mark the request as completed
+               (complete-request (dm-pending-request dm))
+               
                (return-from start-retrieval))
               ((not (or (eq t (third (car recent)))
                         (eq nil (third (car recent)))
@@ -291,6 +304,10 @@
                (print-warning "Invalid retrieval request.")
                (print-warning ":recently-retrieved parameter's value can only be t, nil, or reset.")
                (setf (dm-busy dm) nil)
+               
+               ;; mark the request as completed
+               (complete-request (dm-pending-request dm))
+               
                (setf (last-request-invalid (dm-last-request dm)) :bad-value)
                (return-from start-retrieval))
               
@@ -360,18 +377,30 @@
                      (print-warning "Invalid retrieval request.")
                      (print-warning ":mp-value parameter used more than once.")
                      (setf (dm-busy dm) nil)
+                     
+                     ;; mark the request as completed
+                     (complete-request (dm-pending-request dm))
+                     
                      (setf (last-request-invalid (dm-last-request dm)) :mp-multi)
                      (return-from start-retrieval))
                     ((not (eq '= (caar mp-value)))
                      (print-warning "Invalid retrieval request.")
                      (print-warning ":mp-value parameter's modifier can only be =.")
                      (setf (dm-busy dm) nil)
+                     
+                     ;; mark the request as completed
+                     (complete-request (dm-pending-request dm))
+                     
                      (setf (last-request-invalid (dm-last-request dm)) :mp-modifier)
                      (return-from start-retrieval))
                     ((not (numornil (third (car mp-value))))
                      (print-warning "Invalid retrieval request.")
                      (print-warning ":mp-value parameter's value can only be nil or a number.")
                      (setf (dm-busy dm) nil)
+                     
+                     ;; mark the request as completed
+                     (complete-request (dm-pending-request dm))
+                     
                      (setf (last-request-invalid (dm-last-request dm)) :mp-not-num)
                      (return-from start-retrieval))
                     
@@ -410,7 +439,7 @@
                         
                         (let* ((extra-spec (mapcan (lambda (x)
                                                      (unless (or (eq (car x) '=) (eq (car x) '-) (keywordp (second x)))
-                                                       (list x)))
+                                                       x))
                                              (chunk-spec-slot-spec request)))
                                (matches (if extra-spec
                                             (find-matching-chunks (define-chunk-spec-fct extra-spec) :chunks chunk-list)
@@ -587,7 +616,7 @@
 
 
 
-(defun blend-slot (dm instance activation-list dont-generalize slot)
+(defun blend-slot (dm instance activation-list dont-generalize slot request)
   
   (let* ((possible-values (mapcan (lambda (x) 
                                     (awhen (fast-chunk-slot-value-fct (third x) slot)
@@ -630,20 +659,23 @@
                                                 (copy-list (cdr x))
                                               nil))
                                     (dm-chunks dm)))
-                              (remove-duplicates true-mags)))
+                              (remove-duplicates true-mags :test 'equalp)))
                     (best-val nil)
                     (best-mag nil))
                        
-               (dolist (val chunks)
-                 (let ((sum 0.0))
-                   (dolist (possible possible-values)
-                     (let ((sim (chunks-similarity dm val (blending-item-mag possible))))
-                       (incf sum (* (blending-item-prob possible) (expt sim 2)))))
+               (if (= 1 (length chunks))
+                   (setf best-val (car chunks))
+                 
+                 (dolist (val chunks)
+                   (let ((sum 0.0))
+                     (dolist (possible possible-values)
+                       (let ((sim (chunks-similarity dm val (blending-item-mag possible))))
+                         (incf sum (* (blending-item-prob possible) (expt sim 2)))))
                              
-                   (when (or (null best-mag)
-                             (< sum best-mag))
-                     (setf best-mag sum)
-                     (setf best-val val))))
+                     (when (or (null best-mag)
+                               (< sum best-mag))
+                       (setf best-mag sum)
+                       (setf best-val val)))))
                        
                (cond ((and (blending-module-m->v instance)
                            (not (equalp slot-vals mags)))
@@ -654,26 +686,31 @@
          
         
 (defun start-blending (instance request)
-    
-  (let ((ignore nil) 
-        (dont-generalize nil)
-        (sblt nil))
-    
-    (when (blending-module-sblt instance)
-      (setf sblt (make-sblt-trace))
-      (setf (gethash (mp-time) (blending-module-trace-table instance)) sblt))
+  
+    (flet ((blending-terminated (&rest warnings)
+                              (complete-request request)
+                              (dolist (x warnings)
+                                (print-warning x))
+                              (return-from start-blending)))
+      (let ((ignore nil) 
+            (dont-generalize nil)
+            (sblt nil))
+        
+        ;; set the currently pending request
+  
+        (setf (blending-module-pending-request instance) request)
+
+        (when (blending-module-sblt instance)
+          (setf sblt (make-sblt-trace))
+          (setf (gethash (mp-time) (blending-module-trace-table instance)) sblt))
     
     (when (member :ignore-slots (chunk-spec-slots request))
       
       (let ((ignore-slots (chunk-spec-slot-spec request :ignore-slots)))
         (cond ((> (length ignore-slots) 1)
-               (print-warning "Invalid blending request.")
-               (print-warning ":ignore-slots parameter used more than once.")
-               (return-from start-blending))
+               (blending-terminated "Invalid blending request." ":ignore-slots parameter used more than once."))
               ((not (listp (spec-slot-value (first ignore-slots))))
-               (print-warning "Invalid blending request.")
-               (print-warning ":ignore-slots parameter's value must be a list.")
-               (return-from start-blending))
+               (blending-terminated "Invalid blending request." ":ignore-slots parameter's value must be a list."))
               (t 
                (setf ignore (spec-slot-value (first ignore-slots)))))))
     
@@ -681,13 +718,9 @@
       
       (let ((ignore-slots (chunk-spec-slot-spec request :do-not-generalize)))
         (cond ((> (length ignore-slots) 1)
-               (print-warning "Invalid blending request.")
-               (print-warning ":do-not-generalize parameter used more than once.")
-               (return-from start-blending))
+               (blending-terminated "Invalid blending request." ":do-not-generalize parameter used more than once."))
               ((not (listp (spec-slot-value (first ignore-slots))))
-               (print-warning "Invalid blending request.")
-               (print-warning ":do-not-generalize parameter's value must be a list.")
-               (return-from start-blending))
+               (blending-terminated "Invalid blending request." ":do-not-generalize parameter's value must be a list."))
               (t 
                (setf dont-generalize (spec-slot-value (first ignore-slots)))))))
     
@@ -715,12 +748,12 @@
                                    ;; filled and empty already done
                                    ;; so just test the inequalities
                                    
-                                   (let ((extra-spec (mapcan (lambda (x)
-                                                               (unless (or (eq (spec-slot-op x) '=) 
-                                                                           (eq (spec-slot-op x) '-) 
-                                                                           (keywordp (spec-slot-name x)))
-                                                                 (list x)))
-                                                       request-details)))
+                                   (let ((extra-spec (flatten (mapcan (lambda (x)
+                                                                        (unless (or (eq (spec-slot-op x) '=) 
+                                                                                    (eq (spec-slot-op x) '-) 
+                                                                                    (keywordp (spec-slot-name x)))
+                                                                          (list x)))
+                                                                request-details))))
                                      (if extra-spec
                                          (find-matching-chunks (define-chunk-spec-fct extra-spec) :chunks chunk-list)
                                        chunk-list)))))
@@ -753,12 +786,7 @@
                                                        (progn (setf (chunk-blending-suppressed chunk) t)
                                                          nil)
                                                      (list (list (chunk-activation chunk) 
-                                                                 (handler-case (exp (/ (chunk-activation chunk) temperature))
-                                                                   (floating-point-underflow () 0)
-                                                                   (floating-point-overflow () 
-                                                                                            ;; can't print the warning since it's in parallel
-                                                                                            ;; just use something big and assume it's available for now...
-                                                                                            (exp 50)))
+                                                                 nil
                                                                  chunk))))
                                                  matching-chunks)
                               (mapcan (lambda (chunk) 
@@ -769,17 +797,32 @@
                                             (progn (setf (chunk-blending-suppressed chunk) t)
                                               nil)
                                           (list (list (chunk-activation chunk) 
-                                                      (handler-case (exp (/ (chunk-activation chunk) temperature))
-                                                        (floating-point-underflow () 0)
-                                                        (floating-point-overflow () 
-                                                                                 (print-warning "Math overflow during blending chunk activation for ~s is ~s" chunk (chunk-activation chunk)) 
-                                                                                 (print-warning "Results of blending are not likely to be meaningful.")
-                                                                                 ;; just use something big and assume it's available for now...
-                                                                                 (exp 50)))
+                                                      nil
                                                       chunk))))
-                                matching-chunks))))
+                                matching-chunks)))
+           (max-ai (when activation-list (reduce 'max activation-list :key 'first))))
       
-      ;(format t "chunk-list: ~S matching-chunks: ~s activation-list: ~s~%" chunk-list matching-chunks activation-list)
+      
+      (if (and *use-actr-team* (<= *use-actr-team* (length matching-chunks)))
+          (parallel-run *actr-team* (lambda (x)
+                                      (setf (second x)
+                                        (handler-case (exp (/ (- (first x) max-ai) temperature))
+                                          (floating-point-underflow () 0)
+                                          (floating-point-overflow () ;; shouldn't actually happen...
+                                                                   (print-warning "Math overflow during blending.  Chunk activation for ~s is ~s with temperature ~s" (third x) (first x) temperature)
+                                                                   (print-warning "Results of blending are not likely to be meaningful.")
+                                                                   ;; just use something big and assume it's available for now...
+                                                                   (exp 50)))))
+                        activation-list)
+          (dolist (x activation-list)
+            (setf (second x)
+              (handler-case (exp (/ (- (first x) max-ai) temperature))
+                (floating-point-underflow () 0)
+                (floating-point-overflow () ;; shouldn't actually happen...
+                                         (print-warning "Math overflow during blending.  Chunk activation for ~s is ~s with temperature ~s" (third x) (first x) temperature)
+                                         (print-warning "Results of blending are not likely to be meaningful.")
+                                         ;; just use something big and assume it's available for now...
+                                         (exp 50))))))
       
       (when (and (blending-module-blend-all instance) (null (blending-module-mp instance)))
         (print-warning "The :blend-all-slots parameter is set to t, but the :mp parameter is nil which means only perfect matches can occur."))
@@ -832,16 +875,25 @@
       (when (blending-module-trace instance)
         (if (blending-module-tmp instance)
             (model-output "Blending temperature is: ~f" temperature)
-          (model-output "Blending temperature defaults to (* (sqrt 2) :ans): ~f" temperature)))
+          (if (blending-module-ans instance)
+              (model-output "Blending temperature defaults to (* (sqrt 2) :ans): ~f" temperature)
+            (model-output "Blending temperature defaults to 1 when :ans and :tmp are both nil"))))
       
-      (let ((sum (reduce '+ (mapcar 'second activation-list)))
+      (let ((sum (reduce '+ activation-list :key 'second)) ;; parallelizing this probably isn't useful because tests seem to show those additions take 
+                                                           ;; negligible time for lists of 10k elements...
             (new-chunk nil)
             (blended-results (mapcar (lambda (x) (cons x nil)) blended-slots))
             (sblt-slot nil))
         
-        (if (and *use-actr-team* (<= *use-actr-team* (length activation-list)))
-            (parallel-run *actr-team* (lambda (x) (setf (second x) (/ (second x) sum))) activation-list)
-          (mapc (lambda (x) (setf (second x) (/ (second x) sum))) activation-list))
+        ;; also probably not worth parallelizing unless lists are expected to be
+        ;; really large...
+        ;;(if (and *use-actr-team* (<= *use-actr-team* (length activation-list)))
+        ;;    (parallel-run *actr-team* (lambda (x) (setf (second x) (/ (second x) sum))) activation-list)
+        ;;
+        
+        (mapc (lambda (x) (setf (second x) (/ (second x) sum))) activation-list)
+        
+        ;)
        
         (when (blending-module-sblt instance)
           (setf (sblt-trace-activation-list sblt) activation-list)
@@ -858,7 +910,7 @@
         
         (if (and *use-actr-team* (second blended-slots)) ;; if there's more than one always do in parallel
             (setf blended-results
-              (parallel-run *actr-team* (lambda (x) (blend-slot dm instance activation-list dont-generalize x)) blended-slots))
+              (parallel-run *actr-team* (lambda (x) (blend-slot dm instance activation-list dont-generalize x request)) blended-slots))
           
           (dolist (slot blended-slots)
             
@@ -939,14 +991,6 @@
                        (when (blending-module-sblt instance)
                          (setf (sblt-slot-condition sblt-slot) which))
                        
-                       (when (blending-module-trace instance)
-                         (case which
-                           (:chunks
-                            (model-output "When all magnitudes are chunks blending based on similarities to all related chunks"))
-                           (:not-generalized
-                            (model-output "When all magnitudes are chunks and the slot is not generalized blending based on similarities to only those chunks"))
-                           (:other
-                            (model-output "When not all magnitudes are numbers or chunks blending based on similarities using those values"))))
                        
                        (let* ((type (when (eq which :chunks) (common-chunk-type true-mags)))
                               (chunks (if (eq which :chunks)
@@ -957,7 +1001,18 @@
                                                           (copy-list (cdr x))
                                                         nil))
                                               (dm-chunks dm)))
-                                        (remove-duplicates true-mags))))
+                                        (remove-duplicates true-mags :test 'equalp))))
+                         
+                         (when (blending-module-trace instance)
+                           (case which
+                             (:chunks
+                              (model-output "When all magnitudes are chunks blending based on similarities to all related chunks"))
+                             (:not-generalized
+                              (model-output "When all magnitudes are chunks and the slot is not generalized blending based on similarities to only those chunks"))
+                             (:other
+                              (model-output "When not all magnitudes are numbers or chunks blending based on similarities using those unique values: ~s" chunks))))
+                       
+                       
                          
                          (when (blending-module-sblt instance)
                            (setf (sblt-slot-ctype sblt-slot) type)
@@ -971,35 +1026,42 @@
                          (let ((best-val nil)
                                (best-mag nil))
                            
-                           (dolist (val chunks)
+                           (if (= 1 (length chunks))
+                               (progn
+                                 (setf best-val (car chunks))
+                                 (when (blending-module-trace instance)
+                                   (model-output " Only one possible value ~S" (car chunks))))
                              
-                             (when (blending-module-trace instance)
-                               (model-output " Comparing value ~S" val))
                              
-                             (let ((sum 0.0))
+                             (dolist (val chunks)
                                
-                               (dolist (possible possible-values)
+                               (when (blending-module-trace instance)
+                                 (model-output " Comparing value ~S" val))
+                               
+                               (let ((sum 0.0))
                                  
-                                 (let ((sim (chunks-similarity dm val (blending-item-mag possible))))
-                                   (when (blending-module-sblt instance)
-                                     (push-last (cons val (list possible sim))
-                                                (sblt-slot-possible-values sblt-slot)))
+                                 (dolist (possible possible-values)
                                    
-                                   (incf sum (* (blending-item-prob possible) (expt sim 2)))
-                                   
-                                   (when (blending-module-trace instance)
-                                     (model-output "  Chunk ~s with probability ~f slot value ~s~@[ converted to magnitude ~s~] similarity: ~f cumulative result: ~f" 
-                                                   (blending-item-name possible) (blending-item-prob possible)
-                                                   (blending-item-value possible) 
-                                                   (if (equalp (blending-item-value possible) (blending-item-mag possible))
-                                                       nil
-                                                     (blending-item-mag possible))
-                                                   sim sum))))
-                               
-                               (when (or (null best-mag)
-                                         (< sum best-mag))
-                                 (setf best-mag sum)
-                                 (setf best-val val))))
+                                   (let ((sim (chunks-similarity dm val (blending-item-mag possible))))
+                                     (when (blending-module-sblt instance)
+                                       (push-last (cons val (list possible sim))
+                                                  (sblt-slot-possible-values sblt-slot)))
+                                     
+                                     (incf sum (* (blending-item-prob possible) (expt sim 2)))
+                                     
+                                     (when (blending-module-trace instance)
+                                       (model-output "  Chunk ~s with probability ~f slot value ~s~@[ converted to magnitude ~s~] similarity: ~f cumulative result: ~f" 
+                                                     (blending-item-name possible) (blending-item-prob possible)
+                                                     (blending-item-value possible) 
+                                                     (if (equalp (blending-item-value possible) (blending-item-mag possible))
+                                                         nil
+                                                       (blending-item-mag possible))
+                                                     sim sum))))
+                                 
+                                 (when (or (null best-mag)
+                                           (< sum best-mag))
+                                   (setf best-mag sum)
+                                   (setf best-val val)))))
                            
                            (cond ((and (blending-module-m->v instance)
                                        (not (equalp slot-vals mags)))
@@ -1011,11 +1073,11 @@
                                       (setf (sblt-slot-adjusted-val sblt-slot) result))
                                     
                                     (when (blending-module-trace instance)
-                                      (model-output " Final result: ~f  Converted to value: ~s" best-val result))))
+                                      (model-output " Final result: ~s  Converted to value: ~s" best-val result))))
                                  (t 
                                   (setf (cdr (assoc slot blended-results)) best-val)
                                   (when (blending-module-trace instance)
-                                    (model-output " Final result: ~f" best-val))))))))))))
+                                    (model-output " Final result: ~s" best-val))))))))))))
         
         ;; put the fixed values into the chunk def.
         
@@ -1081,7 +1143,7 @@
                     :module 'blending
                     :destination 'blending
                     :details (symbol-name 'blending-failure)
-                    :output 'medium)))))))))
+                    :output 'medium))))))))))
 
 
 (provide "PARALLEL-CHUNKS")

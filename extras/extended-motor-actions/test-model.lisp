@@ -168,6 +168,7 @@
 
                   
 (clear-all)
+(require-extra "extended-motor-actions")
 
 (define-model test-motor
     (sgp-fct (list :v t :trace-detail 'high :key-closure-time *kct* 

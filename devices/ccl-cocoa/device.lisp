@@ -172,6 +172,9 @@
 ;;;             :   method needs to pass the vision module in too.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2016.06.16 Dan
+;;;             : * Make sure the text and oval features for a button with a
+;;;             :   single text item have the same coordinates.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -709,20 +712,24 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
                         (setf start-y (+ (point-v (view-global-position self))
                                          (round (- btn-height (* lines
                                                                  (+ ascent descent))) 2)))
-                        (set-color-of-feats (system-color->symbol (part-color self :text))
-                                            (build-string-feats vis-mod :text text
-                                                                :start-x 
-                                                                (+ (point-h (view-global-position self))
-                                                                   (round  btn-width 2))
-                                                                :x-fct (lambda (string startx obj)
-                                                                         (declare (ignore obj))
-                                                                         (- startx
-                                                                            (round (funcall width-fct string) 2))) 
-                                                                :y-pos start-y
-                                                                :width-fct width-fct 
-                                                                :height (round (min ascent btn-height))
-                                                                :obj self
-                                                                :line-height (round (+ ascent descent))))))))))
+                        (let ((text-feats
+                               (set-color-of-feats (system-color->symbol (part-color self :text))
+                                                   (build-string-feats vis-mod :text text
+                                                                       :start-x 
+                                                                       (+ (point-h (view-global-position self))
+                                                                          (round  btn-width 2))
+                                                                       :x-fct (lambda (string startx obj)
+                                                                                (declare (ignore obj))
+                                                                                (- startx
+                                                                                   (round (funcall width-fct string) 2))) 
+                                                                       :y-pos start-y
+                                                                       :width-fct width-fct 
+                                                                       :height (round (min ascent btn-height))
+                                                                       :obj self
+                                                                       :line-height (round (+ ascent descent))))))
+                          (when (= 1 (length text-feats)) ; force a single text item to have same coords as the oval
+                              (mod-chunk-fct (first text-feats) (list 'screen-x (px (view-loc self)) 'screen-y (py (view-loc self)))))
+                          text-feats)))))))
     (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y vis-mod))))
       (dolist (x (cdr feats))
         (setf (chunk-visual-approach-width-fn x) fun)))

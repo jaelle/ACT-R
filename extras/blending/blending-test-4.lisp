@@ -26,6 +26,7 @@
 
 
 (clear-all)
+(require-extra "blending")
 
 ;; A simple linear mapping of the
 ;; size chunks onto numbers.
@@ -67,7 +68,6 @@
   
   ;; some chunks which don't need to be in DM
   (define-chunks 
-      (dummy isa chunk)
       (key-1 isa chunk)
       (key-2 isa chunk))
 
@@ -125,11 +125,11 @@
      ==>
      !output! (blended size is =size)
      
-     ; Overwrite the blended chunk to prevent it from 
-     ; being added to dm.  Not necessary, but keeps the 
+     ; Overwrite the blended chunk to erase it and keep it 
+     ; from being added to dm.  Not necessary, but keeps the 
      ; examples simpler.
      
-     @blending> dummy
+     @blending>
      
      +blending>
        isa target
@@ -137,24 +137,24 @@
   )
 
 #| Here's a trace of the run
-CG-USER(38): (run 10)
-     0.000   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.050   PROCEDURAL             PRODUCTION-FIRED P1 
-     0.050   PROCEDURAL             CLEAR-BUFFER BLENDING 
-     0.050   BLENDING               START-BLENDING 
+CG-USER(544): (run 1)
+     0.000   PROCEDURAL             CONFLICT-RESOLUTION
+     0.050   PROCEDURAL             PRODUCTION-FIRED P1
+     0.050   PROCEDURAL             CLEAR-BUFFER BLENDING
+     0.050   BLENDING               START-BLENDING
 Blending request for chunks with slots (KEY) 
 Blending temperature defaults to (* (sqrt 2) :ans): 0.35355338
 Chunk A matches blending request
   Activation 2.5325232
-  Probability of recall 0.004971579
+  Probability of recall 0.00497158
 
 Chunk B matches blending request
   Activation 3.763482
-  Probability of recall 0.1616471
+  Probability of recall 0.16164705
 
 Chunk C matches blending request
   Activation 4.3433366
-  Probability of recall 0.8333813
+  Probability of recall 0.8333814
 
 
 Slots to be blended: (SIZE)
@@ -162,9 +162,9 @@ Finding blended value for slot: SIZE
 Matched chunks' slots contain: (LARGE X-LARGE TINY)
 Magnitude values for those items: (4 5 1)
 With numeric magnitudes blending by weighted average
- Chunk A with probability 0.004971579 times magnitude 4.0 = 0.019886317 cumulative result: 0.019886317
- Chunk B with probability 0.1616471 times magnitude 5.0 = 0.80823547 cumulative result: 0.8281218
- Chunk C with probability 0.8333813 times magnitude 1.0 = 0.8333813 cumulative result: 1.6615031
+ Chunk A with probability 0.00497158 times magnitude 4.0 = 0.01988632 cumulative result: 0.01988632
+ Chunk B with probability 0.16164705 times magnitude 5.0 = 0.8082353 cumulative result: 0.8281216
+ Chunk C with probability 0.8333814 times magnitude 1.0 = 0.8333814 cumulative result: 1.6615031
  Final result: 1.6615031  Converted to value: SMALL
 This is the definition of the blended chunk:
 (KEY KEY-1 SIZE SMALL)
@@ -174,23 +174,23 @@ Computing activation and latency for the blended chunk
  Activation of chunk B is 3.763482
  Activation of chunk C is 4.3433366
 Activation for blended chunk is: 4.8876944
-     0.050   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.058   BLENDING               BLENDING-COMPLETE 
-     0.058   BLENDING               SET-BUFFER-CHUNK BLENDING CHUNK0 
-     0.058   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.108   PROCEDURAL             PRODUCTION-FIRED P2 
+     0.050   PROCEDURAL             CONFLICT-RESOLUTION
+     0.058   BLENDING               BLENDING-COMPLETE
+     0.058   BLENDING               SET-BUFFER-CHUNK BLENDING CHUNK0
+     0.058   PROCEDURAL             CONFLICT-RESOLUTION
+     0.108   PROCEDURAL             PRODUCTION-FIRED P2
 BLENDED SIZE IS SMALL 
-     0.108   PROCEDURAL             CLEAR-BUFFER BLENDING 
-     0.108   BLENDING               START-BLENDING 
+     0.108   PROCEDURAL             CLEAR-BUFFER BLENDING
+     0.108   BLENDING               START-BLENDING
 Blending request for chunks with slots (KEY) 
 Blending temperature defaults to (* (sqrt 2) :ans): 0.35355338
 Chunk E matches blending request
   Activation 3.2689652
-  Probability of recall 0.90319115
+  Probability of recall 0.9031912
 
 Chunk D matches blending request
   Activation 2.4794111
-  Probability of recall 0.096808806
+  Probability of recall 0.09680881
 
 
 Slots to be blended: (SIZE)
@@ -198,8 +198,8 @@ Finding blended value for slot: SIZE
 Matched chunks' slots contain: (SMALL)
 Magnitude values for those items: (2)
 With numeric magnitudes blending by weighted average
- Chunk E with probability 0.90319115 times magnitude 2.0 = 1.8063823 cumulative result: 1.8063823
- Final result: 1.8063823  Converted to value: SMALL
+ Chunk E with probability 0.9031912 times magnitude 2.0 = 1.8063824 cumulative result: 1.8063824
+ Final result: 1.8063824  Converted to value: SMALL
 This is the definition of the blended chunk:
 (KEY KEY-2 SIZE SMALL)
 
@@ -208,10 +208,10 @@ Computing activation and latency for the blended chunk
  Activation of chunk D is 2.4794111
 Activation for blended chunk is: 3.643316
 Not above threshold so blending failed
-     0.108   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.126   BLENDING               BLENDING-FAILURE 
-     0.126   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.126   ------                 Stopped because no events left to process 
+     0.108   PROCEDURAL             CONFLICT-RESOLUTION
+     0.126   BLENDING               BLENDING-FAILURE
+     0.126   PROCEDURAL             CONFLICT-RESOLUTION
+     0.126   ------                 Stopped because no events left to process
 0.126
 28
 NIL

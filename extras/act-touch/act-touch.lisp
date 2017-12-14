@@ -164,6 +164,9 @@
 ;;; * Updated the actions which don't use the "default" style mechanisms to
 ;;;   complete the request for use with the new utility learning credit assignment
 ;;;   approach.
+;;; 2016.03.14 Dan Bothell
+;;; * Added the provide and a compile-and-load for the multi-touch device so that
+;;;   require-extra gets both.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -484,8 +487,7 @@
 
 
 
+(when (requiring-extra)
+  (compile-and-load (translate-logical-pathname "ACT-R:extras;act-touch;virtual-multitouch-device.lisp")))
 
-
-
-
-
+(provide "act-touch")

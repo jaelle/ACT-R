@@ -1,15 +1,9 @@
 
-proc make_buffer_history_viewer {} {
-  
-  if {[currently_selected_model] == "nil"} {
-    tk_messageBox -icon info -type ok -title "Buffer History" -message "Tracing tools require a current model."
-  } else {
+proc make_buffer_history_viewer {key current} {
 
   set win [toplevel [new_variable_name .buffer_history]]
   
   wm withdraw $win
-
-  record_new_window $win $win
 
   wm geometry $win [get_configuration .buffer_history $win]
   
@@ -24,8 +18,11 @@ proc make_buffer_history_viewer {} {
                         -exportselection 0 -font list_font -bd 0]
 
   
-  send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 \
-                        (lambda (x) (declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 dummy-env-handler nil $key"
+  } else {
+    send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 dummy-env-handler nil"
+  }
   
   bind $list_box_1 <Destroy> {
     remove_handler %W
@@ -45,17 +42,17 @@ proc make_buffer_history_viewer {} {
                         -exportselection 0 -font list_font -bd 0]
 
   
-  send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 \
-                        (lambda (x) (declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 dummy-env-handler nil $key"
+  } else {
+    send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 dummy-env-handler nil"
+  } 
   
   bind $list_box_2 <Destroy> {
     remove_handler %W
   }
   
-  set list_scroll_bar_2 [scrollbar $list_frame_2.list_scrl \
-                                 -command "$list_box_2 yview"]
-
-
+  set list_scroll_bar_2 [scrollbar $list_frame_2.list_scrl -command "$list_box_2 yview"]
 
 
   # The lables for the sections
@@ -63,14 +60,6 @@ proc make_buffer_history_viewer {} {
   set l1 [label $win.l1 -text "Times" -justify left -font label_font]
   set l2 [label $win.l2 -text "Buffers" -justify left -font label_font]
   set l3 [label $win.l3 -text "Details" -justify left -font label_font]
-
-  send_environment_cmd \
-      "create list-handler $l1 $win.dummy \
-         (lambda (x) (declare (ignore x)) (no-output (sgp :save-buffer-history t)) nil) (reset) [send_model_name]"
-
-
-    bind $l1 <Destroy> "remove_handler $l1"
-
 
   # frame for the chunk display
 
@@ -80,8 +69,11 @@ proc make_buffer_history_viewer {} {
                      "$text_frame_1.text_scrl set"  \
                      -font text_font]
   
-  send_environment_cmd "create text-handler $text_box_1 $text_box_1 \
-                        (lambda (x)(declare (ignore x)) \" \") nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-handler $text_box_1 $text_box_1 (lambda (x)(declare (ignore x)) \" \") nil $key"
+  } else {
+    send_environment_cmd "create text-handler $text_box_1 $text_box_1 (lambda (x)(declare (ignore x)) \" \") nil"
+  }
 
   bind $text_box_1 <Destroy> {
     remove_handler %W
@@ -98,11 +90,11 @@ proc make_buffer_history_viewer {} {
 
   # make both selection lists call the buffer display updater 
 
-  bind $list_box_1 <<ListboxSelect>> "select_buffer_history %W $list_box_2 $text_box_1"
-  bind $list_box_2 <<ListboxSelect>> "select_buffer_history $list_box_1 %W $text_box_1"
+  bind $list_box_1 <<ListboxSelect>> [list select_buffer_history %W $list_box_2 $text_box_1 $key]
+  bind $list_box_2 <<ListboxSelect>> [list select_buffer_history $list_box_1 %W $text_box_1 $key]
 
 
-  button $win.get -text "Get History" -font button_font -command "get_buffer_history_data $list_box_1 $list_box_2"
+  button $win.get -text "Get History" -font button_font -command [list get_buffer_history_data $list_box_1 $list_box_2 $key]
 
     
   pack $list_scroll_bar_1 -side right -fill y 
@@ -129,27 +121,26 @@ proc make_buffer_history_viewer {} {
   focus $win
 
   return $win
-  }
 }
 
 
-proc get_buffer_history_data {timelst bufferlst} {
+proc get_buffer_history_data {timelst bufferlst key} {
 
   send_environment_cmd "update [get_handler_name $timelst] \
     (lambda (x) \
       (declare (ignore x)) \
-      (buffer-history-time-list))"
+      (buffer-history-time-list '$key))"
 
   send_environment_cmd "update [get_handler_name $bufferlst] \
     (lambda (x) \
       (declare (ignore x)) \
-      (buffer-history-buffer-list))"
+      (buffer-history-buffer-list '$key))"
 
 }
 
 
 
-proc select_buffer_history {timewin bufferwin target_win} {
+proc select_buffer_history {timewin bufferwin target_win key} {
   if [valid_handler_name $target_win] {
     set selections [$bufferwin curselection]
     if {[llength $selections] != 0} {
@@ -163,23 +154,17 @@ proc select_buffer_history {timewin bufferwin target_win} {
         send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (buffer-history-text \"$time\" '$buffer))"
+                (buffer-history-text \"$time\" '$buffer '$key))"
       } else {
         send_environment_cmd \
-          "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
+          "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)) \" \")" 
       }
     } else {
       send_environment_cmd \
-        "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
+        "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)) \" \")" 
     }
   }
 }
 
-# Make a button for the control panel that will open a new buffer history viewer
 
-button [control_panel_name].buffer_history -command {make_buffer_history_viewer} \
-       -text "Buffer History" -font button_font
-
-# put that button on the control panel
-
-pack [control_panel_name].buffer_history
+add_history_button make_buffer_history_viewer "Buffers" :save-buffer-history "Buffer history" right get-buffer-history-data default-save-history-info

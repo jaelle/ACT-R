@@ -1,4 +1,4 @@
-(defvar *unit6-choice-data* '(0.66 0.78 0.82 0.84))
+(defvar *unit6-choice-data* '(0.664 0.778 0.804 0.818))
 
 (defvar *response*)
 

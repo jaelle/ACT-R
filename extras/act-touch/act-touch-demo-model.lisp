@@ -39,8 +39,8 @@
 ;;; 
 ;;; Description : A quickie demonstration of ACT-Touch
 ;;;
-;;; Usage	: Place in ACT-R folder "User Loads." This file will load
-;;;		automatically after ACT-R loads.
+;;; Usage	: Load this file and call run-touch-demo to run the demonstration
+;;;             : model.  Does not require loading act-touch separately.
 ;;; 
 ;;; Bugs        : None known
 ;;;
@@ -55,6 +55,9 @@
 ;;;             : virtual-multitouch-device.lisp file.
 ;;;             : Added a chunk-type named goal with a slot named op.
 ;;;             : Added chunk definitions for all of the chunks in the model.
+;;; 2016.03.14 Dan Bothell
+;;;             : Added the require-extra so that it automatcally loads the
+;;;             : act-touch extension if it's not already available.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;; ---------------------------------------------------------------------- ;;;;
@@ -62,7 +65,7 @@
 ;;;; ---------------------------------------------------------------------- ;;;;
 
 (clear-all)
-
+(require-extra "act-touch")
 
 (defun run-touch-demo ()
   (reset)

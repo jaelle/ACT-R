@@ -10,7 +10,7 @@
 
 
 (clear-all)
-
+(require-extra "blending")
 
 (define-model test-blending
     (sgp :seed (2 1) :v t :blt t :esc t :ans .25 :rt 5 :mp 1 :tmp 1.5)
@@ -20,7 +20,6 @@
   
   ;; some chunks which don't need to be in DM
   (define-chunks 
-      (dummy isa chunk)
       (key-1 isa chunk)
       (key-2 isa chunk))
 
@@ -93,11 +92,11 @@
      ==>
      !output! (blended value is =val and size is =size)
      
-     ; Overwrite the blended chunk to prevent it from 
-     ; being added to dm.  Not necessary, but keeps the 
+     ; Overwrite the blended chunk to erase it and keep it 
+     ; from being added to dm.  Not necessary, but keeps the 
      ; examples simpler.
      
-     @blending> dummy
+     @blending>
      
      +blending>
        isa target
@@ -105,16 +104,16 @@
   )
 
 #| Here's a trace of the run
-CG-USER(31): (run 1)
-     0.000   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.050   PROCEDURAL             PRODUCTION-FIRED P1 
-     0.050   PROCEDURAL             CLEAR-BUFFER BLENDING 
-     0.050   BLENDING               START-BLENDING 
+CG-USER(542): (run 1)
+     0.000   PROCEDURAL             CONFLICT-RESOLUTION
+     0.050   PROCEDURAL             PRODUCTION-FIRED P1
+     0.050   PROCEDURAL             CLEAR-BUFFER BLENDING
+     0.050   BLENDING               START-BLENDING
 Blending request for chunks with slots (KEY) 
 Blending temperature is: 1.5
 Chunk D matches blending request
   Activation 1.370572
-  Probability of recall 0.05508611
+  Probability of recall 0.055086102
 
 Chunk E matches blending request
   Activation 0.906558
@@ -126,11 +125,11 @@ Chunk C matches blending request
 
 Chunk B matches blending request
   Activation 3.9501731
-  Probability of recall 0.30754817
+  Probability of recall 0.3075481
 
 Chunk A matches blending request
   Activation 3.2755852
-  Probability of recall 0.19615525
+  Probability of recall 0.19615522
 
 
 Slots to be blended: (SIZE VALUE)
@@ -142,41 +141,41 @@ Intersection of slots for values is: (SIZE-TYPE)
  Comparing value X-LARGE
   Chunk E with probability 0.040429305 slot value SMALL similarity: -0.6 cumulative result: 0.014554551
   Chunk C with probability 0.40078118 slot value TINY similarity: -0.9 cumulative result: 0.3391873
-  Chunk B with probability 0.30754817 slot value X-LARGE similarity: 0.0 cumulative result: 0.3391873
-  Chunk A with probability 0.19615525 slot value LARGE similarity: -0.1 cumulative result: 0.34114885
+  Chunk B with probability 0.3075481 slot value X-LARGE similarity: 0.0 cumulative result: 0.3391873
+  Chunk A with probability 0.19615522 slot value LARGE similarity: -0.1 cumulative result: 0.34114885
  Comparing value LARGE
   Chunk E with probability 0.040429305 slot value SMALL similarity: -0.3 cumulative result: 0.0036386377
   Chunk C with probability 0.40078118 slot value TINY similarity: -0.6 cumulative result: 0.14791988
-  Chunk B with probability 0.30754817 slot value X-LARGE similarity: -0.1 cumulative result: 0.15099536
-  Chunk A with probability 0.19615525 slot value LARGE similarity: 0.0 cumulative result: 0.15099536
+  Chunk B with probability 0.3075481 slot value X-LARGE similarity: -0.1 cumulative result: 0.15099536
+  Chunk A with probability 0.19615522 slot value LARGE similarity: 0.0 cumulative result: 0.15099536
  Comparing value MEDIUM
   Chunk E with probability 0.040429305 slot value SMALL similarity: -0.1 cumulative result: 4.042931e-4
   Chunk C with probability 0.40078118 slot value TINY similarity: -0.3 cumulative result: 0.036474604
-  Chunk B with probability 0.30754817 slot value X-LARGE similarity: -0.3 cumulative result: 0.06415394
-  Chunk A with probability 0.19615525 slot value LARGE similarity: -0.1 cumulative result: 0.06611549
+  Chunk B with probability 0.3075481 slot value X-LARGE similarity: -0.3 cumulative result: 0.06415393
+  Chunk A with probability 0.19615522 slot value LARGE similarity: -0.1 cumulative result: 0.06611548
  Comparing value SMALL
   Chunk E with probability 0.040429305 slot value SMALL similarity: 0.0 cumulative result: 0.0
   Chunk C with probability 0.40078118 slot value TINY similarity: -0.1 cumulative result: 0.004007812
-  Chunk B with probability 0.30754817 slot value X-LARGE similarity: -0.6 cumulative result: 0.11472515
-  Chunk A with probability 0.19615525 slot value LARGE similarity: -0.3 cumulative result: 0.13237913
+  Chunk B with probability 0.3075481 slot value X-LARGE similarity: -0.6 cumulative result: 0.11472513
+  Chunk A with probability 0.19615522 slot value LARGE similarity: -0.3 cumulative result: 0.1323791
  Comparing value TINY
   Chunk E with probability 0.040429305 slot value SMALL similarity: -0.1 cumulative result: 4.042931e-4
   Chunk C with probability 0.40078118 slot value TINY similarity: 0.0 cumulative result: 4.042931e-4
-  Chunk B with probability 0.30754817 slot value X-LARGE similarity: -0.9 cumulative result: 0.24951829
-  Chunk A with probability 0.19615525 slot value LARGE similarity: -0.6 cumulative result: 0.3201342
+  Chunk B with probability 0.3075481 slot value X-LARGE similarity: -0.9 cumulative result: 0.24951825
+  Chunk A with probability 0.19615522 slot value LARGE similarity: -0.6 cumulative result: 0.32013413
  Final result: MEDIUM
 Finding blended value for slot: VALUE
 Matched chunks' slots contain: (1 3 3 2 1)
 Magnitude values for those items: (1 3 3 2 1)
 With numeric magnitudes blending by weighted average
- Chunk D with probability 0.05508611 times magnitude 1.0 = 0.05508611 cumulative result: 0.05508611
+ Chunk D with probability 0.055086102 times magnitude 1.0 = 0.055086102 cumulative result: 0.055086102
  Chunk E with probability 0.040429305 times magnitude 3.0 = 0.12128791 cumulative result: 0.17637402
  Chunk C with probability 0.40078118 times magnitude 3.0 = 1.2023436 cumulative result: 1.3787177
- Chunk B with probability 0.30754817 times magnitude 2.0 = 0.61509633 cumulative result: 1.993814
- Chunk A with probability 0.19615525 times magnitude 1.0 = 0.19615525 cumulative result: 2.1899693
- Final result: 2.1899693
+ Chunk B with probability 0.3075481 times magnitude 2.0 = 0.6150962 cumulative result: 1.9938139
+ Chunk A with probability 0.19615522 times magnitude 1.0 = 0.19615522 cumulative result: 2.189969
+ Final result: 2.189969
 This is the definition of the blended chunk:
-(KEY KEY-1 SIZE MEDIUM VALUE 2.1899693)
+(KEY KEY-1 SIZE MEDIUM VALUE 2.189969)
 
 Computing activation and latency for the blended chunk
  Activation of chunk D is 1.370572
@@ -185,23 +184,23 @@ Computing activation and latency for the blended chunk
  Activation of chunk B is 3.9501731
  Activation of chunk A is 3.2755852
 Activation for blended chunk is: 5.0881505
-     0.050   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.056   BLENDING               BLENDING-COMPLETE 
-     0.056   BLENDING               SET-BUFFER-CHUNK BLENDING CHUNK0 
-     0.056   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.106   PROCEDURAL             PRODUCTION-FIRED P2 
-BLENDED VALUE IS 2.1899693 AND SIZE IS MEDIUM 
-     0.106   PROCEDURAL             CLEAR-BUFFER BLENDING 
-     0.106   BLENDING               START-BLENDING 
+     0.050   PROCEDURAL             CONFLICT-RESOLUTION
+     0.056   BLENDING               BLENDING-COMPLETE
+     0.056   BLENDING               SET-BUFFER-CHUNK BLENDING CHUNK0
+     0.056   PROCEDURAL             CONFLICT-RESOLUTION
+     0.106   PROCEDURAL             PRODUCTION-FIRED P2
+BLENDED VALUE IS 2.189969 AND SIZE IS MEDIUM 
+     0.106   PROCEDURAL             CLEAR-BUFFER BLENDING
+     0.106   BLENDING               START-BLENDING
 Blending request for chunks with slots (KEY) 
 Blending temperature is: 1.5
 Chunk D matches blending request
   Activation 2.065042
-  Probability of recall 0.10480823
+  Probability of recall 0.10480824
 
 Chunk E matches blending request
   Activation 1.0152556
-  Probability of recall 0.052053634
+  Probability of recall 0.05205363
 
 Chunk C matches blending request
   Activation 4.080316
@@ -223,28 +222,28 @@ Magnitude values for those items: (SMALL TINY X-LARGE LARGE)
 When all magnitudes are chunks blending based on similarities to all related chunks
 Intersection of slots for values is: (SIZE-TYPE)
  Comparing value X-LARGE
-  Chunk E with probability 0.052053634 slot value SMALL similarity: -0.6 cumulative result: 0.01873931
+  Chunk E with probability 0.05205363 slot value SMALL similarity: -0.6 cumulative result: 0.018739307
   Chunk C with probability 0.40167704 slot value TINY similarity: -0.9 cumulative result: 0.3440977
   Chunk B with probability 0.22155161 slot value X-LARGE similarity: 0.0 cumulative result: 0.3440977
   Chunk A with probability 0.21990952 slot value LARGE similarity: -0.1 cumulative result: 0.3462968
  Comparing value LARGE
-  Chunk E with probability 0.052053634 slot value SMALL similarity: -0.3 cumulative result: 0.0046848273
+  Chunk E with probability 0.05205363 slot value SMALL similarity: -0.3 cumulative result: 0.004684827
   Chunk C with probability 0.40167704 slot value TINY similarity: -0.6 cumulative result: 0.14928856
   Chunk B with probability 0.22155161 slot value X-LARGE similarity: -0.1 cumulative result: 0.15150408
   Chunk A with probability 0.21990952 slot value LARGE similarity: 0.0 cumulative result: 0.15150408
  Comparing value MEDIUM
-  Chunk E with probability 0.052053634 slot value SMALL similarity: -0.1 cumulative result: 5.205364e-4
+  Chunk E with probability 0.05205363 slot value SMALL similarity: -0.1 cumulative result: 5.205363e-4
   Chunk C with probability 0.40167704 slot value TINY similarity: -0.3 cumulative result: 0.03667147
   Chunk B with probability 0.22155161 slot value X-LARGE similarity: -0.3 cumulative result: 0.056611117
   Chunk A with probability 0.21990952 slot value LARGE similarity: -0.1 cumulative result: 0.05881021
  Comparing value SMALL
-  Chunk E with probability 0.052053634 slot value SMALL similarity: 0.0 cumulative result: 0.0
+  Chunk E with probability 0.05205363 slot value SMALL similarity: 0.0 cumulative result: 0.0
   Chunk C with probability 0.40167704 slot value TINY similarity: -0.1 cumulative result: 0.0040167705
   Chunk B with probability 0.22155161 slot value X-LARGE similarity: -0.6 cumulative result: 0.08377536
   Chunk A with probability 0.21990952 slot value LARGE similarity: -0.3 cumulative result: 0.10356721
  Comparing value TINY
-  Chunk E with probability 0.052053634 slot value SMALL similarity: -0.1 cumulative result: 5.205364e-4
-  Chunk C with probability 0.40167704 slot value TINY similarity: 0.0 cumulative result: 5.205364e-4
+  Chunk E with probability 0.05205363 slot value SMALL similarity: -0.1 cumulative result: 5.205363e-4
+  Chunk C with probability 0.40167704 slot value TINY similarity: 0.0 cumulative result: 5.205363e-4
   Chunk B with probability 0.22155161 slot value X-LARGE similarity: -0.9 cumulative result: 0.17997734
   Chunk A with probability 0.21990952 slot value LARGE similarity: -0.6 cumulative result: 0.25914478
  Final result: MEDIUM
@@ -252,8 +251,8 @@ Finding blended value for slot: VALUE
 Matched chunks' slots contain: (1 3 3 2 1)
 Magnitude values for those items: (1 3 3 2 1)
 With numeric magnitudes blending by weighted average
- Chunk D with probability 0.10480823 times magnitude 1.0 = 0.10480823 cumulative result: 0.10480823
- Chunk E with probability 0.052053634 times magnitude 3.0 = 0.1561609 cumulative result: 0.26096913
+ Chunk D with probability 0.10480824 times magnitude 1.0 = 0.10480824 cumulative result: 0.10480824
+ Chunk E with probability 0.05205363 times magnitude 3.0 = 0.15616089 cumulative result: 0.26096913
  Chunk C with probability 0.40167704 times magnitude 3.0 = 1.2050312 cumulative result: 1.4660003
  Chunk B with probability 0.22155161 times magnitude 2.0 = 0.44310322 cumulative result: 1.9091035
  Chunk A with probability 0.21990952 times magnitude 1.0 = 0.21990952 cumulative result: 2.129013
@@ -269,10 +268,10 @@ Computing activation and latency for the blended chunk
  Activation of chunk A is 3.1766677
 Activation for blended chunk is: 4.770789
 Not above threshold so blending failed
-     0.106   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.113   BLENDING               BLENDING-FAILURE 
-     0.113   PROCEDURAL             CONFLICT-RESOLUTION 
-     0.113   ------                 Stopped because no events left to process 
+     0.106   PROCEDURAL             CONFLICT-RESOLUTION
+     0.113   BLENDING               BLENDING-FAILURE
+     0.113   PROCEDURAL             CONFLICT-RESOLUTION
+     0.113   ------                 Stopped because no events left to process
 0.113
 28
 NIL

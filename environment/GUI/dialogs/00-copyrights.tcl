@@ -83,7 +83,7 @@ proc select_copyrights {} {
 
     label .copyright.lab22 -font intro_l_font -height 1 -text {ACT-R Environment} -anchor center
     label .copyright.lab30 -font intro_l_font -height 2 -textvariable copyrightlab30var -anchor center
-    label .copyright.lab24 -font intro_s_font -height 1 -text {© 2002-2014} -anchor center
+    label .copyright.lab24 -font intro_s_font -height 1 -text {© 2002-2016} -anchor center
     label .copyright.lab33 -font intro_s_font -height 1 -anchor center -text {Dan Bothell} 
     label .copyright.lab43 -font intro_s_font -height 1 -anchor center -text {John R. Anderson}  
     label .copyright.lab35 -font intro_s_font -height 1 -anchor center -text {Department of Psychology, Carnegie Mellon University}  
@@ -126,7 +126,7 @@ proc select_copyrights {} {
 
     send_environment_cmd \
       "create simple-handler .copyright.lab30 copyrightlab30var \
-         (lambda (x) (declare (ignore x)) (format nil \"ACT-R ~a~%version ~a\" *actr-major-version-string* *actr-version-string*)) nil"
+         (lambda (x) (declare (ignore x)) (format nil \"ACT-R ~a~%version ~a\" *actr-architecture-version* *actr-version-string*)) nil"
 
     send_environment_cmd \
       "create simple-handler .checkstate local_connection \

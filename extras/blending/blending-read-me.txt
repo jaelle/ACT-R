@@ -1,16 +1,27 @@
-This document describes the blending module for ACT-R 6.1.
+This document describes a module for ACT-R 7 which implements the 
+blended retrieval mechanism described in:
 
-The slides in the blending.pdf file describe the original
+Lebiere, C. (1999).  The dynamics of cognitive arithmetic. Kognitionswissenschaft 
+[Journal of the German Cognitive Science Society] Special issue on cognitive
+modelling and cognitive architectures,  D.Wallach & H. A. Simon (eds.)., 8 (1), 5-19.
+
+
+The slides in the included blending.pdf file describe the original
 ACT-R 4 version of the mechanism.  The theory of this module
 is basically same, but the implementation is different in
-ACT-R 6.1.  This document and the example blending-test models 
-show the details of using it in ACT-R 6.1.
+ACT-R 7.  This document and the example blending-test models 
+show the details of the ACT-R 7 implementation.
 
 
-To use the module move the blending.lisp file into the modules
+To use the module the easiest thing to do is call 
+(require-extra "blending") and placing that into any model
+which needs blending will ensure it's loaded as needed, but
+one can also move the blending.lisp file into the modules
 directory of the ACT-R source file distribution before loading
-the ACT-R 6.1 loader or load that file explicitly after loading 
-the ACT-R 6.1 loader.
+the main ACT-R load file or load the blending.lisp file 
+explicitly after loading the main ACT-R loader (there must
+not be a model currently defined at the time the file is
+loaded).
 
 
 Once the module is added to the system it will add another
@@ -18,12 +29,15 @@ buffer called blending for a model to use.  There is no
 switch needed to activate blending once the module is loaded.
 
 
-There is also a history tool for use with the ACT-R environment
+There is also a history tool for use with the ACT-R Environment
 if desired.  To use that put the blending-history-tool.lisp
 file into the other-files directory and the 77b-blending-history.tcl
-file into the environment/GUI/dialogs directory.  The blending
-history tool works basically the same as the retrieval history
-tool which is described in the Environment's manual.
+file into the environment/GUI/dialogs directory before loading
+ACT-R and starting the Environment.  The blending history tool 
+works basically the same as the retrieval history tool which is 
+described in the Environment's manual.  For now, the history
+tool must be manually enabled as descrbed -- there's no simple
+require which will make it available.
 
 The blending module assumes that the default declarative module 
 is also loaded.  If that module has been modified or removed
@@ -158,11 +172,10 @@ takes to run the model.
 
 If :do-not-generalize is provided it must specify a list of slot names.
 Any of those slots which will receive a blended value in the 
-resulting chunk will be computed without using blending method c if 
-the values to be blended are all chunks.  Instead it will use method 
-d for those slots.  This may be necessary when one wants to use chunks
-for the slot contents and doesn't want blending to potentially consider
-all other chunks as values.
+resulting chunk will be computed without using blending method b described
+below.  Instead it will use method c for those slots.  This may be 
+necessary when one wants to use chunks for the slot contents and doesn't 
+want blending to potentially consider all other chunks as values.
 
 ----------------------------------------------------------------
 
@@ -267,10 +280,13 @@ c) the m(k,i) values are neither all numbers nor all chunks, or
    the slot k is in the :do-not-generalize list specified in the request
  
   A set of potential values, PV(k), is created which contains all 
-  of the m(k,i) values.  
+  of the unique (tested with equalp) m(k,i) values.  
 
-  For each item j in PV(k) a value B(j) is computed as the
-  sum over the chunks i in MS of p(i) times the square of the
+  If there is only one unique item in PV(k) then that value is
+  R(k) with no further computation.
+
+  Otherwise, for each item j in PV(k) a value B(j) is computed as 
+  the sum over the chunks i in MS of p(i) times the square of the
   similarity between j and m(k,i).
  
   Note: Since the items in PV(k) may not be chunks this assumes that

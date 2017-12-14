@@ -29,7 +29,17 @@ to this readme file):
 
 
 To use ACT-Touch the act-touch.lisp file must be loaded after loading ACT-R.
-The easiest way to do that is to place the act-touch.lisp file into the ACT-R
+
+The easiest way to do that is to use the ACT-R command require-extra like
+this:
+
+(require-extra "act-touch")
+
+That will load both the act-touch and the virtual-multitouch-device files.
+Putting that in any model file which uses the extension would make sure
+it gets loaded when needed without having to move or load files.
+
+Another way to do that is to place the act-touch.lisp file into the ACT-R
 user-loads directory so that it will be loaded automatically after the main
 ACT-R files have been loaded.  The virtual-multitouch-device.lisp file may be
 placed there as well if one wants to use that device for model interactions.
@@ -44,5 +54,5 @@ http://cogscent.com/.
 Direct technical support inquiries regarding ACT-Touch to Frank Tamborello:
 frank.tamborello@cogscent.com.
 
-This version of ACT-Touch is only compatible with ACT-R 6.1.  A version that
+This version of ACT-Touch is only compatible with ACT-R 7.  A version that
 that can be used with ACT-R 6.0 is available on Cogscent, LLC's website.

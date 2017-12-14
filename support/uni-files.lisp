@@ -264,6 +264,9 @@
 ;;; 2015.08.10 Dan
 ;;;            : * Adjusting the LispWorks version tests since v7 is now
 ;;;            :   available and I'm assuming it works like 6...
+;;; 2016.05.31 Dan
+;;;            : * Using finish-format for anything that goes to *error-
+;;;            :   output*.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -755,11 +758,11 @@
 
 #-(or :allegro :cmu :sbcl)
 (defun uni-report-error (err message)
-  (format *error-output* "~a~%Error:~a" message err))
+  (finish-format *error-output* "~a~%Error:~a" message err))
 
 #+:allegro 
 (defun uni-report-error (err message)
-  (format *error-output* "~a~%Error:~a" message 
+  (finish-format *error-output* "~a~%Error:~a" message 
     (if (slot-boundp  err 'EXCL::FORMAT-CONTROL)
         (apply #'format nil 
                (simple-condition-format-control err)

@@ -1,0 +1,9 @@
+*.fasl
+*.dx32fsl
+*.dx64fsl
+environment/GUI/*
+environment/GUI/init
+extras/cmsaa/*
+other-files/*
+tools/*
+tutorial/*

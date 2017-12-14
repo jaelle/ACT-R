@@ -53,7 +53,7 @@ proc make_procedural_viewer {} {
   # Have it update on reset and after every cycle hooks.
   
   send_environment_cmd "create list-box-handler $list_box $list_box \
-                        (lambda (x) (declare (ignore x)) (no-output (pp))) (post) [send_model_name]"
+                        (lambda (x) (declare (ignore x)) (all-productions)) (post) [send_model_name]"
   
   # Make sure that when this window is closed that the Lisp side
   # handler gets removed as well
@@ -239,7 +239,7 @@ proc show_why_not {prods model} {
 # Make a button for the control panel that will open a new procedural viewer
 
 button [control_panel_name].procedural -command {make_procedural_viewer} \
-                                 -text "Procedural viewer" -font button_font
+                                 -text "Procedural" -font button_font
 
 # put that button on the control panel
 

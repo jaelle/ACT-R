@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : printing.lisp
-;;; Version     : 1.1
+;;; Version     : 1.2
 ;;; 
 ;;; Description : Module that provides model output control.
 ;;; 
@@ -120,6 +120,31 @@
 ;;;             :   a "tag" for the warning and it will only print a warning
 ;;;             :   with a given tag (equal test) the first time it occurs after 
 ;;;             :   a reset.
+;;; 2016.04.11 Dan [1.2]
+;;;             : * Adding a parameter to have the module save the trace info
+;;;             :   whether or not it's being printed and a command to print
+;;;             :   out a saved trace at any detail level for an optionally
+;;;             :   specified subsegment.  For now this is going to be crude and
+;;;             :   just store a list of the formatted output for each event
+;;;             :   since that's easy but costly in terms of space.  Some sort 
+;;;             :   of caching would probably be better for space (since something
+;;;             :   like conflict-resolution is going to show up a lot) but has
+;;;             :   a bigger time cost since a lookup would have to happen for
+;;;             :   every event.
+;;; 2016.04.12 Dan
+;;;             : * Added a get-saved-trace function to allow access to the data
+;;;             :   without having to print it out or wrap it in a no-output, and
+;;;             :   include the time and output level with that.
+;;; 2016.04.13 Dan
+;;;             : * Fixed a copy-and-paste error in get-saved-trace.
+;;; 2016.04.14 Dan
+;;;             : * Might as well save the event itself and recreate the trace
+;;;             :   after the fact if needed. 
+;;;             : * Don't return the trace items from show-saved-trace since
+;;;             :   get-saved-trace can be used for that -- have each do its
+;;;             :   own thing.
+;;; 2016.04.21 Dan
+;;;             : * Minor improvement to internals of show and get saved-trace
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -148,7 +173,7 @@
 
 (defun create-printing-module (model-name)
   (declare (ignore model-name))
-  (make-printing-module))
+  (make-instance 'printing-module))
 
 (defun verify-printing-param (param)
   (or (null param) (eq param t) (streamp param) (pathnamep param)
@@ -171,7 +196,15 @@
       (print-warning "Error encountered when trying to open the file associated with the ~s parameter:~% ~s" cmd err)
       (print-warning "The ~s parameter is being set to t instead." cmd))
     result))
-  
+
+
+
+(defun printing-module-trace-recorder (event)
+  (when (current-model)
+    (let ((instance (get-module printing-module)))
+      (when (printing-module-save-trace instance)
+        (push-last event (printing-module-saved-trace instance))))))
+
 (defun printing-module-param (module param)
   (if (consp param)
       (case (car param)
@@ -210,7 +243,38 @@
         (:model-warnings
          (setf (printing-module-model-warnings module) (cdr param)))
         (:cbct
-         (setf (printing-module-cbct module) (cdr param))))
+         (setf (printing-module-cbct module) (cdr param)))
+        
+        (:save-trace
+         (let ((current (cdr param))
+               (previous (printing-module-save-trace module)))
+           
+           (cond ((eq current previous) ;; hasn't changed
+                  
+                  ;; don't do anything but return current value
+                  current)
+                 ((null previous) ;; it was off now it's on
+                  
+                  ;; if there's not an event hook add one now and
+                  ;; if there is increment the count of users 
+                  
+                  (let ((state (gethash (current-meta-process) (printing-module-event-hook module))))
+                    (if (null state)
+                        (setf (gethash (current-meta-process) (printing-module-event-hook module))
+                          (cons (add-post-event-hook 'printing-module-trace-recorder) 1))
+                      (incf (cdr state))))
+                  
+                  (setf (printing-module-save-trace module) t))
+                 
+                 (t ;; it was on now it's off
+                  (let ((state (gethash (current-meta-process) (printing-module-event-hook module))))
+                    (if (= 1 (cdr state))
+                        (progn
+                          (delete-event-hook (car state))
+                          (remhash (current-meta-process) (printing-module-event-hook module)))
+                      (decf (cdr state))))
+                  
+                  (setf (printing-module-save-trace module) nil))))))
     
     (case param
       (:v (act-r-output-stream (printing-module-v module)))
@@ -218,7 +282,8 @@
       (:trace-filter (printing-module-filter module))
       (:trace-detail (printing-module-detail module))
       (:model-warnings (printing-module-model-warnings module))
-      (:cbct (printing-module-cbct module)))))
+      (:cbct (printing-module-cbct module))
+      (:save-trace (printing-module-save-trace module)))))
 
 (defun reset-printing-module (module)
   (when (act-r-output-file (printing-module-v module))
@@ -234,8 +299,18 @@
   (setf (printing-module-one-time-tags module) nil)
   (setf (printing-module-filter module) nil)
   (setf (printing-module-detail module) 'high)
-  (setf (printing-module-suppress-cmds module) nil))
+  (setf (printing-module-suppress-cmds module) nil)
+  (setf (printing-module-saved-trace module) nil))
 
+(defun delete-printing-module (module)
+  (reset-printing-module module)
+  (when (printing-module-save-trace module)
+    (let ((state (gethash (current-meta-process) (printing-module-event-hook module))))
+      (if (= 1 (cdr state))
+          (progn
+            (delete-event-hook (car state))
+            (remhash (current-meta-process) (printing-module-event-hook module)))
+        (decf (cdr state))))))
 
 (define-module-fct 'printing-module 
     nil 
@@ -268,22 +343,27 @@
      :default-value t
      :warning "must be t or nil"
      :valid-test 'tornil)
-      (define-parameter :cbct
+   (define-parameter :cbct
        :documentation "Whether or not to show an event in the trace when a buffer copies a chunk"
      :default-value nil
      :warning "must be t or nil"
+     :valid-test 'tornil)
+   (define-parameter :save-trace
+       :documentation "Whether or not the model's event trace should be saved"
+     :default-value nil
+     :warning "must be t or nil"
      :valid-test 'tornil))
-  :version "1.1"
+  :version "1.2"
   :documentation "Coordinates output of the model."
   :creation 'create-printing-module
   :reset 'reset-printing-module
-  :delete 'reset-printing-module
+  :delete 'delete-printing-module
   :params 'printing-module-param)
 
 
 (defun filter-output-events (event)
-  (with-model-fct (if (evt-model event) (evt-model event) (first (mp-models))) ;; just use the first if there isn't one (a break event)
-    (list (list 'filter-test event))))
+  (with-model-eval (if (evt-model event) (evt-model event) (first (mp-models))) ;; just use the first if there isn't one (a break event)
+    (filter-test event)))
 
 (defun filter-test (event)
   (let ((module (get-module printing-module)))
@@ -306,6 +386,78 @@
 
 (defun show-copy-buffer-trace ()
   (printing-module-cbct (get-module printing-module)))
+
+(defun show-saved-trace (&key (detail 'medium) start end)
+  (verify-current-mp 
+   "No current meta-process when calling show-saved-trace"
+   (verify-current-model 
+    "No current model when calling show-saved-trace"
+    (let ((module (get-module printing-module)))
+      (cond ((not (position detail '(t low medium high)))
+             (print-warning "Invalid detail level for show-saved-trace ~a.  Possible values are: t, low, medium, and high." detail))
+            ((and start (not (numberp start)))
+             (print-warning "Invalid start for show-saved-trace ~a.  Must be a number indicating a time in seconds." start))
+            ((and end (not (numberp end)))
+             (print-warning "Invalid end for show-saved-trace ~a.  Must be a number indicating a time in seconds." end))
+            ((and (numberp start) (numberp end) (< end start))
+             (print-warning "End time for show-saved-trace must be greater than the start time, but given start=~f and end=~f" start end))
+            ((null (printing-module-saved-trace module))
+             (print-warning "No saved trace information to display."))
+            (t
+             (let* ((full-trace (printing-module-saved-trace module))
+                    (start-index (if start
+                                     (aif (position-if (lambda (x) (>= (evt-mstime x) (seconds->ms start))) full-trace)
+                                          it 
+                                          (length full-trace))
+                                   0))
+                    (end-index (when end (position-if (lambda (x) (> (evt-mstime x) (seconds->ms end))) full-trace)))
+                    (trace-segment (subseq full-trace start-index end-index)))
+               (dolist (i trace-segment t)
+                 (when (or (eq detail t)
+                           (case detail
+                             (low (eq (evt-output i) 'low))
+                             (medium (or (eq (evt-output i) 'low)
+                                         (eq (evt-output i) 'medium)))
+                             (high (evt-output i))))
+                   (let ((trace (format-event i)))
+                     (command-output "~a" trace)))))))))))
+
+
+
+(defun get-saved-trace (&key (detail 'medium) start end)
+  (verify-current-mp 
+   "No current meta-process when calling get-saved-trace"
+   (verify-current-model 
+    "No current model when calling get-saved-trace"
+    (let ((module (get-module printing-module)))
+      (cond ((not (position detail '(t low medium high)))
+             (print-warning "Invalid detail level for get-saved-trace ~a.  Possible values are: t, low, medium, and high." detail))
+            ((and start (not (numberp start)))
+             (print-warning "Invalid start for get-saved-trace ~a.  Must be a number indicating a time in seconds." start))
+            ((and end (not (numberp end)))
+             (print-warning "Invalid end for get-saved-trace ~a.  Must be a number indicating a time in seconds." end))
+            ((and (numberp start) (numberp end) (< end start))
+             (print-warning "End time for get-saved-trace must be greater than the start time, but given start=~f and end=~f" start end))
+            ((null (printing-module-saved-trace module))
+             (print-warning "No saved trace information available."))
+            (t
+             (let* ((full-trace (printing-module-saved-trace module))
+                    (start-index (if start
+                                     (aif (position-if (lambda (x) (>= (evt-mstime x) (seconds->ms start))) full-trace)
+                                          it 
+                                          (length full-trace))
+                                   0))
+                    (end-index (when end (position-if (lambda (x) (> (evt-mstime x) (seconds->ms end))) full-trace)))
+                    (trace-segment (subseq full-trace start-index end-index)))
+               (mapcan (lambda (x)
+                         (when (or (eq detail t)
+                           (case detail
+                             (low (eq (evt-output x) 'low))
+                             (medium (or (eq (evt-output x) 'low)
+                                         (eq (evt-output x) 'medium)))
+                             (high (evt-output x))))
+                           (list (list (evt-mstime x) (evt-output x) (format-event x)))))
+                          trace-segment))))))))
 
 #|
 This library is free software; you can redistribute it and/or

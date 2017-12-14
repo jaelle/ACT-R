@@ -398,6 +398,13 @@
 ;;;             : * Module now has a trackable buffer for use with the new 
 ;;;             :   utility learning mechanism and reports when requests are
 ;;;             :   finished with complete-request.
+;;; 2016.06.30 Dan
+;;;             : * Added an optional parameter to add-chunk-into-dm so that 
+;;;             :   merge-chunk-into-dm can pass the key in since that can be
+;;;             :   costly to create.
+;;; 2016.09.01 Dan
+;;;             : * The activation trace didn't actually print the chunk name when
+;;;             :   the retrieval set hook forced an override.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -1158,7 +1165,7 @@
                      (setf (sact-trace-result (dm-current-trace dm)) (car return-val)))
                    
                    (when (dm-act-level (dm-act dm) 'low)
-                     (model-output "Retrieval-set-hook function forced retrieval of" (car return-val))))
+                     (model-output "Retrieval-set-hook function forced retrieval of chunk ~s" (car return-val))))
                   
                   ((numberp return-val)
                    (setf (dm-busy dm) (schedule-event-relative return-val 'retrieval-failure
@@ -1555,7 +1562,8 @@
   
   ;; Find any existing matching chunk
 
-  (let ((existing (gethash (hash-chunk-contents chunk) (dm-chunk-hash-table dm))))
+  (let* ((key (hash-chunk-contents chunk))
+         (existing (gethash key (dm-chunk-hash-table dm))))
         
     (if existing
         (progn
@@ -1567,8 +1575,8 @@
       
       ;; otherwise add it to the list
       
-      (add-chunk-into-dm dm chunk))))
-
+      (add-chunk-into-dm dm chunk key))))
+  
 ;; add-chunk-into-dm
 ;;;
 ;;; works like merge-chunk-into-dm but without doing any merging i.e. it
@@ -1576,7 +1584,7 @@
 ;;; of whether it is a perfect match to an existing member
 ;;;
 
-(defun add-chunk-into-dm (dm chunk)
+(defun add-chunk-into-dm (dm chunk &optional slot-key)
   
   (aif (assoc (chunk-slots-vector chunk) (dm-chunks dm))
        (push chunk (cdr it)) 
@@ -1588,7 +1596,7 @@
   
   ;; Add it to the merge table
   
-  (let ((key (hash-chunk-contents chunk)))
+  (let ((key (aif slot-key it (hash-chunk-contents chunk))))
     (setf (chunk-fast-merge-key chunk) key)
     (setf (gethash key (dm-chunk-hash-table dm)) chunk))
   

@@ -169,7 +169,7 @@ proc select_buffer_status {listwin target_win model_name} {
 # Make a button for the control panel that will open a new declarative viewer
 
 button [control_panel_name].buffer_status -command {make_buffer_status_viewer} \
-                    -text "Buffer Status viewer" -font button_font
+                    -text "Buffer Status" -font button_font
 
 # put that button on the control panel
 

@@ -401,6 +401,24 @@
 ;;;             : * Use safe-seconds->ms for recording the :tt value.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical in build-compilation-type-file to ACT-R.
+;;; 2016.06.10 Dan
+;;;             : * Fixed a bug with these two productions being considered
+;;;             :   equivalent:
+;;;             :    (p STEP3 =GOAL> ISA GOAL STEP 3 ==> =GOAL> STEP 1)
+;;;             :    (p PRODUCTION0 =GOAL> isa goal STEP 1 ==> =GOAL> STEP 3)
+;;;             :   Which happens because the isa goal isn't a part of the 
+;;;             :   standard representation now so it ends up matching the lhs
+;;;             :   of one to the rhs of the other and vice-versa.  
+;;;             :   Equivalent-productions-p now tests lhs and rhs separately to
+;;;             :   avoid that.
+;;; 2016.07.01 Dan
+;;;             : * Removed some old code that's not used anymore.
+;;;             : * Replaced remove-buffers with basic-variables which accesses
+;;;             :   a value that's stored in a table of the compilation module
+;;;             :   since there's a sizeable cost to recomputing that everytime
+;;;             :   and making it a production parameter requires two hash-table
+;;;             :   lookups instead of one.
+;;;             : * Replaced the format in convert-cmd to a concatenate.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -697,6 +715,7 @@
   (buffer-type-table (make-hash-table))
   ppm
   tt
+  (basic-var-table (make-hash-table :test #'eq))
   (composeable-table (make-hash-table :test #'equalp)))
 
 
@@ -816,8 +835,6 @@
   (make-compilation-module))
 
 
-
-
 (defun reset-production-compilation (instance)
   (setf (compilation-module-previous instance) nil)
   (setf (compilation-module-previous-time instance) 0)
@@ -825,6 +842,8 @@
   (clrhash (compilation-module-composeable-table instance))
   
   (clrhash (compilation-module-buffer-type-table instance))
+  
+  (clrhash (compilation-module-basic-var-table instance))
   
   (setf (compilation-module-buffer-var-names instance) nil)
   
@@ -1181,10 +1200,8 @@
   (let* ((p1 (previous-production-struct (compilation-module-previous module)))
          (p1-s (produce-standard-representation p1))
          (p2-s (produce-standard-representation p2))
-         (p1-variables (production-variables p1))
-         (p2-variables (production-variables p2))
-         (p1-basic-vars (remove-buffers p1-variables))
-         (p2-basic-vars (remove-buffers p2-variables))
+         (p1-basic-vars (basic-variables module p1))
+         (p2-basic-vars (basic-variables module p2))
          (p2-name (production-name p2))
          (new-bindings nil))
     
@@ -1468,7 +1485,7 @@
 
 
 (defun update-params-for-compiled-production (p3 new-prod p1 p2 module procedural)
-  (let ((exists (check-for-duplicate-productions p3 new-prod)))
+  (let ((exists (check-for-duplicate-productions module p3 new-prod)))
     
     (cond ((null exists)
            ;; New production 
@@ -1559,13 +1576,13 @@
     (stable-sort new-actions 'string> :key (lambda (x) (string (car x))))))
 
 
-(defun check-for-duplicate-productions (p name)
+(defun check-for-duplicate-productions (module p name)
   (dolist (old-p (all-productions) nil)
     (unless (equal old-p name)
-      (when (equivalent-productions-p (get-production old-p) p)
+      (when (equivalent-productions-p module (get-production old-p) p)
         (return-from check-for-duplicate-productions old-p)))))
 
-(defun equivalent-productions-p (p1 p2)
+(defun equivalent-productions-p (module p1 p2)
   ;; Check the easy stuff first to
   ;; hopefully be faster
   
@@ -1575,8 +1592,8 @@
     (get-buffer-index p2 nil))
   
   
-  (when (and (= (length (remove-buffers (production-variables p1)))
-                (length (remove-buffers (production-variables p2))))
+  (when (and (= (length (basic-variables module p1))
+                (length (basic-variables module p2)))
              (= (length (production-lhs p1))
                 (length (production-lhs p2)))
              (= (length (production-rhs p1))
@@ -1585,18 +1602,30 @@
                     (production-buffer-indices p2)))
     
     (let ((mappings1 (mapcar (lambda (x) (cons x '&&dummy&&))
-                       (remove-buffers (production-variables p1))))
+                       (basic-variables module p1)))
           (mappings2 (mapcar (lambda (x) (cons x '&&dummy&&))
-                       (remove-buffers (production-variables p2))))
+                       (basic-variables module p2)))
           (s1 (produce-standard-representation p1))
           (s2 (produce-standard-representation p2)))
       
       
       
       ;; Check the overall structure 
-      (unless (= (length (union (replace-variables (copy-tree s1) mappings1)
-                                (replace-variables (copy-tree s2) mappings2) :test 'equalp))
-                 (length s1))
+      ;; do lhs and rhs separately to avoid confusion since
+      ;; =buffer> constructs are the same on lhs and rhs now
+      ;; (since neither has an isa) to avoid these productions
+      ;; being considered the same:
+      ;; (p STEP3 =GOAL> ISA GOAL STEP 3 ==> =GOAL> STEP 1)
+      ;; (p PRODUCTION0 =GOAL> isa goal STEP 1 ==> =GOAL> STEP 3)
+      ;;
+      
+      (unless (and (= (length (union (replace-variables (copy-tree (first s1)) mappings1)
+                                     (replace-variables (copy-tree (first s2)) mappings2) :test 'equalp))
+                      (length (first s1)))
+                   (= (length (union (replace-variables (copy-tree (second s1)) mappings1)
+                                     (replace-variables (copy-tree (second s2)) mappings2) :test 'equalp))
+                      (length (second s1))))
+        
         (return-from equivalent-productions-p nil))
       
       
@@ -1647,13 +1676,6 @@
     res))
 
 
-(defun get-buffer-composition-type (buffer)
-  (aif (get-module production-compilation)
-       (aif (gethash buffer (compilation-module-buffer-type-table it))
-            it
-            (print-warning "No type for buffer ~S found" buffer))
-       (print-warning "Production compilation module not found")))
-
 
 (defun recursive-find (item list)
   (if (listp list)
@@ -1677,14 +1699,17 @@
 
 
 
-(defun remove-buffers (vars)
-  (let ((module (get-module production-compilation)))
-    (remove-if (lambda (x)
-                 (when (find x (compilation-module-buffer-var-names module))
-                   (let* ((buffer (intern (subseq (symbol-name x) 1)))
-                          (buffer-type (get-compilation-type-struct buffer module)))
-                     (comp-buffer-type-drop-out buffer-type))))
-               vars)))
+(defun basic-variables (module p)
+  (multiple-value-bind (value present) (gethash (production-name p) (compilation-module-basic-var-table module))
+    (if present
+        value
+        (setf (gethash (production-name p) (compilation-module-basic-var-table module))
+          (remove-if (lambda (x)
+                       (when (find x (compilation-module-buffer-var-names module))
+                         (let* ((buffer (intern (subseq (symbol-name x) 1)))
+                                (buffer-type (get-compilation-type-struct buffer module)))
+                           (comp-buffer-type-drop-out buffer-type))))
+                     (production-variables p))))))
 
 
 
@@ -1724,9 +1749,9 @@
 
 (defun convert-cmd (statement)
   "Converts a statement to the production symbol"
-  (read-from-string (format nil "~c~a~c" (production-statement-op statement) 
-                      (production-statement-target statement)
-                      (if (eq #\! (production-statement-op statement)) #\! #\>))))
+  (read-from-string (concatenate 'string (string (production-statement-op statement))
+                      (symbol-name  (production-statement-target statement))
+                      (if (eq #\! (production-statement-op statement)) "!" ">"))))
 
 
 

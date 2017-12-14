@@ -96,6 +96,14 @@
 ;;;            :   converted result since it's set in seconds.
 ;;; 2015.06.05 Dan
 ;;;            : * Use schedule-event-now instead of a realtive 0.
+;;; 2016.04.20 Dan
+;;;            : * Fixed a bug that prevented one from setting :traced-buffers
+;;;            :   to nil.
+;;; 2016.06.18 Dan
+;;;            : * Fixed a bug with the return value of :buffer-trace-hook when it
+;;;            :   gets set.
+;;; 2016.06.21 Dan
+;;;            : * Fixed a bug with the previous fix.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -651,7 +659,9 @@ CG-USER(86): (do-experiment)
                 (setf (btm-traced-buffers btm) (cdr param))))
             
             (setf (btm-column-width btm)
-              (apply 'max (mapcar #'(lambda (x) (length (symbol-name x))) (btm-traced-buffers btm))))
+              (if (null (btm-traced-buffers btm))
+                  4
+                (apply 'max (mapcar #'(lambda (x) (length (symbol-name x))) (btm-traced-buffers btm)))))
             (btm-buffers btm))
            
            (:buffer-trace-step 
@@ -702,7 +712,8 @@ CG-USER(86): (do-experiment)
               (or (btm-save btm) (btm-trace btm) (btm-hooks btm)))
             (when (btm-enabled btm)
               ;; eventually will need to record this for later removal
-              (add-post-event-hook 'buffer-trace-event-recorder nil)))))
+              (add-post-event-hook 'buffer-trace-event-recorder nil))
+            (btm-hooks btm))))
         (t 
          (case param
            (:buffer-trace-hook (btm-hooks btm))

@@ -88,6 +88,23 @@
 ;;; 2015.05.20 Dan
 ;;;             : * The approach-width call in the buttons build-vis-locs-for
 ;;;             :   method needs to pass the vision module in too.
+;;; 2016.06.14 Dan
+;;;             : * The build-vis-locs-for for text items (capi:item-pinboard-object) 
+;;;             :   didn't use the item's font size, but the general window's which 
+;;;             :   resulted in incorrect size info for the features that used fonts
+;;;             :   other than the default.  Now use the item's font if it has one
+;;;             :   otherwise use the pinboards.
+;;; 2016.06.16 Dan
+;;;             : * When a button has a single text item make sure that the
+;;;             :   oval and text features have the same location.
+;;; 2016.06.17 Dan 
+;;;             : * Getting rid of the td/bu liner distinction and just use the
+;;;             :   internal capi:line-pinboard-object class since that's basically
+;;;             :   the point of the Lisp specific device -- it should be able to
+;;;             :   parse a screen built with the 'normal' tools.  Changing the uwi 
+;;;             :   so it creates the basic line object, but leaving the old classes 
+;;;             :   and methods defined here so that code which used them at that
+;;;             :   level still should.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; Check the ACT-R packaging switches
@@ -974,19 +991,22 @@
                (multiple-value-bind (ascent descent) (font-info font-spec)
                  (setf start-y (+ (point-v (view-position self))
                                 (round (- btn-height (* lines (+ ascent descent))) 2)))
-                 (build-string-feats vis-mod :text text
-                                   :start-x 
-                                   (+ (point-h (view-position self))
-                                           (round btn-width 2))
-                                   :x-fct (lambda (string startx obj)
-                                            (declare (ignore obj))
-                                            (- startx
-                                               (round (funcall width-fct string) 2)))
-                                   :y-pos start-y
-                                   :width-fct width-fct 
-                                   :height (min ascent btn-height) 
-                                   :obj self
-                                     :line-height (+ ascent descent))))))))
+                 (let ((text-feats (build-string-feats vis-mod :text text
+                                                       :start-x 
+                                                       (+ (point-h (view-position self))
+                                                          (round btn-width 2))
+                                                       :x-fct (lambda (string startx obj)
+                                                                (declare (ignore obj))
+                                                                (- startx
+                                                                   (round (funcall width-fct string) 2)))
+                                                       :y-pos start-y
+                                                       :width-fct width-fct 
+                                                       :height (min ascent btn-height) 
+                                                       :obj self
+                                                       :line-height (+ ascent descent))))
+                   (when (= 1 (length text-feats))
+                     (mod-chunk-fct (first text-feats) (list 'screen-x (px (view-loc self)) 'screen-y (py (view-loc self)))))
+                   text-feats)))))))
     
     (let ((fun (lambda (x y) (declare (ignore x)) (approach-width (car feats) y vis-mod))))
       (dolist (x (cdr feats))
@@ -1116,11 +1136,10 @@
           (setf (chunk-visual-object x) self))
         feats)))))
 
-
 (defmethod build-vis-locs-for ((self capi:item-pinboard-object) ;;static-text-dialog-item
                                (vis-mod vision-module))
   (when-let (pb (capi:pinboard-object-pinboard self))
-    (let ((font-spec (view-font pb))
+    (let ((font-spec (aif (capi:pinboard-object-graphics-arg self :font) it (view-font pb))) ;; the item's font if available
           (text (capi:item-text self))) ;;;dialog-item-text
       (unless (equal text "")
         (multiple-value-bind (ascent descent)
@@ -1184,98 +1203,52 @@
 ;;;             : to black.
 
 (defclass liner (capi:line-pinboard-object)
-  ((view-position :accessor view-position :initarg :view-position :initform nil)
-   (view-size :accessor view-size  :initarg :view-size :initform nil)))
- 
-;;; POINT-IN-CLICK-REGION-P      [Method]
-;;; Description : Override this method so that lines don't handle mouse clicks.
-
-(defmethod point-in-click-region-p ((self liner) where)
-  (declare (ignore where))
-  nil)
-
-
-;;; TD-LINER      [Class]
-;;; Description : A view that represents a line which is drawn top-down 
-;;;             : i.e. from the view-position (upper-left) to the 
-;;;             : [view-size - (1,1)] (lower-right) in the container window
-
+ ())
 (defclass td-liner (liner)
-  ())
-
-;;;  A view that represents a line which is drawn bottom-up i.e. from the
-;;;  view's lower-left to the view's upper-right in the container window.
-
-;;; BU-LINER      [Class]
-;;; Description : A view that represents a line which is drawn bottom-up 
-;;;             : i.e. from the view's lower-left to the view's upper-rignt
-;;;             : in the container window
-
+  ()) 
 (defclass bu-liner (liner)
   ())
 
+(defmethod view-position ((l capi:line-pinboard-object))
+  (let ((coords (capi::coords l)))
+    (vector (min (first coords) (third coords)) (min (second coords) (fourth coords)))))
+
+(defmethod view-size ((l capi:line-pinboard-object))
+  (let ((coords (capi::coords l)))
+    (vector (1+ (abs (- (first coords) (third coords)))) (1+ (abs (- (second coords) (third coords)))))))
+
+;;; POINT-IN-CLICK-REGION-P      [Method]
+;;; Description : Override this method so that lines don't handle mouse clicks.
+
+(defmethod point-in-click-region-p ((self capi:line-pinboard-object) where)
+  (declare (ignore where))
+  nil)
+
 ;;; Description : A td-liner is just a line-feature located "at" it's mid-point.
 
-(defmethod build-vis-locs-for ((lnr td-liner) (vis-mod vision-module))
+(defmethod build-vis-locs-for ((lnr capi:line-pinboard-object) (vis-mod vision-module))
   "Convert the view to a feature to be placed into the visual icon"
-  (let* ((start-pt (view-position lnr))
-         (end-pt (subtract-points (add-points (view-position lnr) (view-size lnr)) 
-                                  (make-point 1 1)))
-         (f  
-          (car (define-chunks-fct `((isa visual-location
-                                         color ,(system-color->symbol (capi:simple-pane-foreground lnr))
-                                         value line
-                                         kind line
-                                         screen-x ,(loc-avg (point-h start-pt) (point-h end-pt))
-                                         screen-y ,(loc-avg (point-v start-pt) (point-v end-pt))
-                                         width ,(abs (- (point-h start-pt) (point-h end-pt)))
-                                         height ,(abs (- (point-v start-pt) (point-v end-pt)))))))
-          ))
-    (setf (chunk-visual-object f) lnr)
-    f))
+  (destructuring-bind (sx sy ex ey) (capi::coords lnr)
+         (let ((f (car (define-chunks-fct `((isa visual-location
+                                                 color ,(system-color->symbol (capi:simple-pane-foreground lnr))
+                                                 value line
+                                                 kind line
+                                                 screen-x ,(loc-avg sx ex)
+                                                 screen-y ,(loc-avg sy ey)
+                                         width ,(abs (- sx ex))
+                                         height ,(abs (- sy ey))))))))
+           (setf (chunk-visual-object f) lnr)
+           f)))
 
 
-(defmethod vis-loc-to-obj ((lnr td-liner) loc)
-  (let ((start-pt (view-position lnr))
-        (end-pt (subtract-points (add-points (view-position lnr) (view-size lnr)) 
-                                 (make-point 1 1)))
-        (v-o (fill-default-vis-obj-slots (car (define-chunks (isa line))) loc)))
-    (set-chunk-slot-value-fct v-o 'end1-x (point-h start-pt))
-    (set-chunk-slot-value-fct v-o 'end1-y (point-v start-pt))
-    (set-chunk-slot-value-fct v-o 'end2-x (point-h end-pt))
-    (set-chunk-slot-value-fct v-o 'end2-y (point-v end-pt))
-    v-o))
-
-(defmethod build-vis-locs-for ((lnr bu-liner) (vis-mod vision-module))
-  "Convert the view to a feature to be placed into the visual icon"
-  (let* ((start-pt (add-points (view-position lnr)
-                               (make-point 0 (1- (point-v (view-size lnr))))))
-         (end-pt (add-points (view-position lnr) 
-                             (make-point (1- (point-h (view-size lnr))) 0)))
-         (f  
-          (car (define-chunks-fct `((isa visual-location
-                                         color ,(system-color->symbol (capi:simple-pane-foreground lnr))
-                                         value line
-                                         kind line
-                                         screen-x ,(loc-avg (point-h start-pt) (point-h end-pt))
-                                         screen-y ,(loc-avg (point-v start-pt) (point-v end-pt))
-                                         width ,(abs (- (point-h start-pt) (point-h end-pt)))
-                                         height ,(abs (- (point-v start-pt) (point-v end-pt)))))))
-          ))
-    (setf (chunk-visual-object f) lnr)
-    f))
-
-(defmethod vis-loc-to-obj ((lnr bu-liner) loc)
-  (let ((start-pt (add-points (view-position lnr)
-                               (make-point 0 (1- (point-v (view-size lnr))))))
-        (end-pt (add-points (view-position lnr) 
-                             (make-point (1- (point-h (view-size lnr))) 0)))
-        (v-o (fill-default-vis-obj-slots (car (define-chunks (isa line))) loc)))
-    (set-chunk-slot-value-fct v-o 'end1-x (point-h start-pt))
-    (set-chunk-slot-value-fct v-o 'end1-y (point-v start-pt))
-    (set-chunk-slot-value-fct v-o 'end2-x (point-h end-pt))
-    (set-chunk-slot-value-fct v-o 'end2-y (point-v end-pt))
-    v-o))
+(defmethod vis-loc-to-obj ((lnr capi:line-pinboard-object) loc)
+  (destructuring-bind (sx sy ex ey) (capi::coords lnr)
+    (let ((v-o (fill-default-vis-obj-slots (car (define-chunks (isa line))) loc)))
+      (set-chunk-slot-value-fct v-o 'end1-x sx)
+      (set-chunk-slot-value-fct v-o 'end1-y sy)
+      (set-chunk-slot-value-fct v-o 'end2-x ex)
+      (set-chunk-slot-value-fct v-o 'end2-y ey)
+      v-o)))
 
 ;;;End Line Stuff
 

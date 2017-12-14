@@ -47,6 +47,13 @@
 ;;; 2015.06.09 Dan
 ;;;             : * Record time in ms internally, but still show seconds to the
 ;;;             :   user in the list.
+;;; 2016.04.22 Dan 
+;;;             : * Start of the work to support the new history tools that 
+;;;             :   allow saving data and then displaying that saved data.
+;;;             : * Now also turn on :sact automatically with :save-dm-history.
+;;; 2016.04.28 Dan
+;;;             : * Use the key from the environment to access the appropriate
+;;;             :   underlying data source.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -55,8 +62,7 @@
 ;;; into the environment/GUI/dialogs directory to use the new tool.
 ;;;
 ;;; Open the retrieval history window before running the model or set the
-;;; :save-dm-history parameter to t and the :sact parameter to t in the model 
-;;; to enable the recording.
+;;; :save-dm-history parameter to t to enable the recording.
 ;;; 
 ;;; Once the model has run click the "Get history" button in the retrieval history 
 ;;; window.  
@@ -92,11 +98,13 @@
   time
   request
   chunks
-  params)
+  chunk-texts
+  params
+  activation-trace)
 
 (defun dm-request-recorder (request)
   (let ((history (get-module retrieval-history))
-        (block (make-dm-history :time (mp-time-ms) :request request)))
+        (block (make-dm-history :time (mp-time-ms) :request (capture-model-output (pprint-chunk-spec request)))))
     (push block (dm-history-module-history history))
     nil))
 
@@ -114,6 +122,10 @@
     
     (dolist (x set)
       (unless (eq x :retrieval-failure)
+        (push (cons x (capture-model-output (pprint-chunks-fct (list x))))
+              (dm-history-chunk-texts record))
+        (push (cons x (capture-model-output (print-chunk-activation-trace-fct x (mp-time-ms) t)))
+              (dm-history-activation-trace record))
         (let ((s (make-string-output-stream)))
           (with-parameters-fct (:cmdt s)
             (suppress-warnings
@@ -123,47 +135,48 @@
   nil)
 
 
-(defun dm-history-chunk-display (time-string chunk)
+(defun dm-history-chunk-display (time-string chunk-name key)
   (let* ((time (read-from-string (remove #\. time-string)))
-         (history (get-module retrieval-history))
-         (record (find time (dm-history-module-history history) :key 'dm-history-time))
-         (params (when (dm-history-p record) (cdr (assoc chunk (dm-history-params record))))))
+         (history (get-history-information :save-dm-history key))
+         (record (find time history :key 'dm-history-time))
+         (chunk (when (dm-history-p record) (cdr (assoc chunk-name (dm-history-chunk-texts record)))))
+         (params (when (dm-history-p record) (cdr (assoc chunk-name (dm-history-params record))))))
          
     (if params
-        (progn
-          (pprint-chunks-fct (list chunk))
-          (format t "~A" params))
-      (unless (eq chunk :retrieval-failure) (format t "History no longer available")))))
+        (format t "~a~A" chunk params)
+      (unless (eq chunk :retrieval-failure) 
+        (format t "History unavailable")))))
 
 
-(defun dm-history-trace-display (time-string chunk)
+(defun dm-history-trace-display (time-string chunk key)
   (let* ((time (read-from-string (remove #\. time-string)))
-         (history (get-module retrieval-history))
-         (record (find time (dm-history-module-history history) :key 'dm-history-time))
-         (params (when (dm-history-p record) (cdr (assoc chunk (dm-history-params record))))))
+         (history (get-history-information :save-dm-history key))
+         (record (find time history :key 'dm-history-time))
+         (trace (when (dm-history-p record) (cdr (assoc chunk (dm-history-activation-trace record))))))
          
-    (when params
-      (print-chunk-activation-trace-fct chunk time t))))
+    (if trace
+        (format t "~a" trace)
+      (format t "Trace unavailable"))))
 
                
-(defun dm-history-chunk-list (time-string)
+(defun dm-history-chunk-list (time-string key)
   (let* ((time (read-from-string (remove #\. time-string)))
-         (history (get-module retrieval-history))
-         (record (find time (dm-history-module-history history) :key 'dm-history-time)))
+         (history (get-history-information :save-dm-history key))
+         (record (find time history :key 'dm-history-time)))
     (dm-history-chunks record)))
 
-(defun dm-history-request-text (time-string)
+(defun dm-history-request-text (time-string key)
   (let* ((time (read-from-string (remove #\. time-string)))
-         (history (get-module retrieval-history))
-         (record (find time (dm-history-module-history history) :key 'dm-history-time)))
-    (pprint-chunk-spec (dm-history-request record))))
+         (history (get-history-information :save-dm-history key))
+         (record (find time history :key 'dm-history-time)))
+    (format t "~a" (dm-history-request record))))
 
 
-(defun dm-history-get-time-list ()
-  (let ((history (get-module retrieval-history)))
+(defun dm-history-get-time-list (key)
+  (let ((history (get-history-information :save-dm-history key)))
     (nreverse (mapcar (lambda (x) 
                         (format nil "~/print-time-in-seconds/" (dm-history-time x))) 
-                (dm-history-module-history history)))))
+                history))))
 
 
 (defun reset-dm-history-module (module)
@@ -180,7 +193,9 @@
                    (unless (find 'dm-request-recorder (car (sgp :retrieval-request-hook)))
                      (sgp :retrieval-request-hook dm-request-recorder))
                    (unless (find 'dm-retrieval-set-recorder (car (sgp :retrieval-set-hook)))
-                     (sgp :retrieval-set-hook dm-retrieval-set-recorder)))
+                     (sgp :retrieval-set-hook dm-retrieval-set-recorder))
+                   (unless (car (sgp :sact))
+                     (sgp :sact t)))
                
                (progn
                  (when (find 'dm-request-recorder (car (sgp :retrieval-request-hook)))
@@ -210,6 +225,11 @@
   :version "1.1"
   :documentation "Module to record retrieval history for display in the environment.")
   
+
+(defun get-retrieval-history ()
+  (let ((m (get-module retrieval-history)))
+    (when m
+      (dm-history-module-history m))))
 
 #|
 This library is free software; you can redistribute it and/or

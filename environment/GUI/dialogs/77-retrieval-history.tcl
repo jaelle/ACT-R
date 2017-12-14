@@ -1,15 +1,9 @@
 
-proc make_declarative_history_viewer {} {
+proc make_declarative_history_viewer {key current} {
   
-  if {[currently_selected_model] == "nil"} {
-    tk_messageBox -icon info -type ok -title "Retrieval History" -message "Tracing tools require a current model."
-  } else {
-
   set win [toplevel [new_variable_name .retrieval_history]]
   
   wm withdraw $win
-
-  record_new_window $win $win
 
   wm geometry $win [get_configuration .retrieval_history $win]
   
@@ -24,9 +18,12 @@ proc make_declarative_history_viewer {} {
                         -exportselection 0 -font list_font -bd 0]
 
   
-  send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 \
-                        (lambda (x) (declare (ignore x))) nil [send_model_name]"
-  
+  if $current {
+    send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 (lambda (x) (declare (ignore x))) nil $key"
+  } else {
+    send_environment_cmd "create list-box-handler $list_box_1 $list_box_1 (lambda (x) (declare (ignore x))) nil"
+  }
+
   bind $list_box_1 <Destroy> {
     remove_handler %W
   }
@@ -45,8 +42,11 @@ proc make_declarative_history_viewer {} {
                         -exportselection 0 -font list_font -bd 0]
 
   
-  send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 \
-                        (lambda (x) (declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 (lambda (x) (declare (ignore x))) nil $key"
+  } else {
+    send_environment_cmd "create list-box-handler $list_box_2 $list_box_2 (lambda (x) (declare (ignore x))) nil"
+  }
   
   bind $list_box_2 <Destroy> {
     remove_handler %W
@@ -54,8 +54,6 @@ proc make_declarative_history_viewer {} {
   
   set list_scroll_bar_2 [scrollbar $list_frame_2.list_scrl \
                                  -command "$list_box_2 yview"]
-
-
 
 
   # The lables for the sections
@@ -67,14 +65,6 @@ proc make_declarative_history_viewer {} {
   set l5 [label $win.l5 -text "Activation" -justify left -font label_font]
 
 
-  send_environment_cmd \
-      "create list-handler $l1 $win.dummy \
-         (lambda (x) (declare (ignore x)) (no-output (sgp :save-dm-history t :sact t)) nil) (reset) [send_model_name]"
-
-
-    bind $l1 <Destroy> "remove_handler $l1"
-
-
   # frame for the chunk display
 
   set text_frame_1 [frame $win.text_frame_1 -borderwidth 0]  
@@ -84,8 +74,11 @@ proc make_declarative_history_viewer {} {
                      -xscrollcommand "$text_frame_1.text_scrl_x set" \
                      -font text_font -wrap none]
   
-  send_environment_cmd "create text-output-handler $text_box_1 $text_box_1 \
-                        (lambda (x)(declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_1 $text_box_1 (lambda (x)(declare (ignore x))) nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_1 $text_box_1 (lambda (x)(declare (ignore x))) nil"
+  }
 
   bind $text_box_1 <Destroy> {
     remove_handler %W
@@ -103,8 +96,6 @@ proc make_declarative_history_viewer {} {
                                  -command "$text_box_1 xview" -orient horizontal]
 
 
-  
-
   # frame for the request display
 
   set text_frame_2 [frame $win.text_frame_2 -borderwidth 0]  
@@ -113,8 +104,11 @@ proc make_declarative_history_viewer {} {
                      "$text_frame_2.text_scrl set"  \
                      -font text_font]
   
-  send_environment_cmd "create text-output-handler $text_box_2 $text_box_2 \
-                        (lambda (x)(declare (ignore x)) \"HI\") nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_2 $text_box_2 (lambda (x)(declare (ignore x)) \"HI\") nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_2 $text_box_2 (lambda (x)(declare (ignore x)) \"HI\") nil"
+  }
 
   bind $text_box_2 <Destroy> {
     remove_handler %W
@@ -133,9 +127,9 @@ proc make_declarative_history_viewer {} {
   # bind the selection of a time to the updating of the chunks list and
   # the request box
 
-  bind $list_box_1 <<ListboxSelect>> "select_dm_history_time %W $list_box_2 $text_box_2"
+  bind $list_box_1 <<ListboxSelect>> [list select_dm_history_time %W $list_box_2 $text_box_2 $key]
 
-  button $win.get -text "Get History" -font button_font -command "get_dm_history_times $list_box_1"
+  button $win.get -text "Get History" -font button_font -command [list get_dm_history_times $list_box_1 $key]
 
 
 
@@ -148,8 +142,11 @@ proc make_declarative_history_viewer {} {
                      -xscrollcommand "$text_frame_3.text_scrl_x set" \
                      -font text_font -wrap none]
   
-  send_environment_cmd "create text-output-handler $text_box_3 $text_box_3 \
-                        (lambda (x)(declare (ignore x))) nil [send_model_name]"
+  if $current {
+    send_environment_cmd "create text-output-handler $text_box_3 $text_box_3 (lambda (x)(declare (ignore x))) nil $key"
+  } else {
+    send_environment_cmd "create text-output-handler $text_box_3 $text_box_3 (lambda (x)(declare (ignore x))) nil"
+  } 
 
   bind $text_box_3 <Destroy> {
     remove_handler %W
@@ -169,8 +166,7 @@ proc make_declarative_history_viewer {} {
   # make chunk selection call the both display updaters 
 
 
-  bind $list_box_2 <<ListboxSelect>> "select_dm_history_chunk %W $list_box_1 $text_box_1; \
-                                      select_dm_history_trace %W $list_box_1 $text_box_3"
+  bind $list_box_2 <<ListboxSelect>> [list update_dm_history_views %W $list_box_1 $text_box_1 $text_box_3 $key]
 
 
     
@@ -212,16 +208,21 @@ proc make_declarative_history_viewer {} {
   focus $win
 
   return $win
-  }
+}
+
+proc update_dm_history_views {self lb1 tb1 tb3 key} {
+
+  select_dm_history_chunk $self $lb1 $tb1 $key
+  select_dm_history_trace $self $lb1 $tb3 $key
 }
 
 
-proc get_dm_history_times {timelst} {
+proc get_dm_history_times {timelst key} {
 
   send_environment_cmd "update [get_handler_name $timelst] \
     (lambda (x) \
       (declare (ignore x)) \
-      (dm-history-get-time-list))"
+      (dm-history-get-time-list '$key))"
 }
 
 
@@ -235,7 +236,7 @@ proc get_dm_history_times {timelst} {
 # and moved up to the server.tcl file for general comsumption, but
 # at this point I'm not sure what that should look like yet...
 
-proc select_dm_history_chunk {chunkwin timewin target_win} {
+proc select_dm_history_chunk {chunkwin timewin target_win key} {
   if [valid_handler_name $target_win] {
     set selections [$chunkwin curselection]
     if {[llength $selections] != 0} {
@@ -249,7 +250,7 @@ proc select_dm_history_chunk {chunkwin timewin target_win} {
         send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-chunk-display \"$time\" '$chunk))"
+                (dm-history-chunk-display \"$time\" '$chunk '$key))"
       } else {
         send_environment_cmd \
           "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
@@ -262,7 +263,7 @@ proc select_dm_history_chunk {chunkwin timewin target_win} {
 }
 
 
-proc select_dm_history_trace {chunkwin timewin target_win} {
+proc select_dm_history_trace {chunkwin timewin target_win key} {
   if [valid_handler_name $target_win] {
     set selections [$chunkwin curselection]
     if {[llength $selections] != 0} {
@@ -276,7 +277,7 @@ proc select_dm_history_trace {chunkwin timewin target_win} {
         send_environment_cmd "update [get_handler_name $target_win] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-trace-display \"$time\" '$chunk))"
+                (dm-history-trace-display \"$time\" '$chunk '$key))"
       } else {
         send_environment_cmd \
           "update [get_handler_name $target_win] (lambda (x) (declare (ignore x)))" 
@@ -289,7 +290,7 @@ proc select_dm_history_trace {chunkwin timewin target_win} {
 }
 
 
-proc select_dm_history_time {timewin chunklist request} {
+proc select_dm_history_time {timewin chunklist request key} {
   if [valid_handler_name $request] {
     set selections [$timewin curselection]
     if {[llength $selections] != 0} {
@@ -298,29 +299,21 @@ proc select_dm_history_time {timewin chunklist request} {
       send_environment_cmd "update [get_handler_name $chunklist] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-chunk-list \"$time\"))"
+                (dm-history-chunk-list \"$time\" '$key))"
 
       send_environment_cmd "update [get_handler_name $request] \
             (lambda (x) \
                 (declare (ignore x)) \
-                (dm-history-request-text \"$time\")))"
-
+                (dm-history-request-text \"$time\" '$key)))"
     } else {
         send_environment_cmd \
           "update [get_handler_name $chunklist] (lambda (x) (Declare (ignore x)))" 
 
         send_environment_cmd \
           "update [get_handler_name $request] (lambda (x) (Declare (ignore x)))" 
-
     }
   }
 }
 
-# Make a button for the control panel that will open a new declarative viewer
 
-button [control_panel_name].declarative_history -command {make_declarative_history_viewer} \
-       -text "Retrieval History" -font button_font
-
-# put that button on the control panel
-
-pack [control_panel_name].declarative_history
+add_history_button make_declarative_history_viewer "Retrievals" :save-dm-history "Retrieval history" right get-retrieval-history default-save-history-info

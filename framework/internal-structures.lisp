@@ -316,6 +316,13 @@
 ;;;             : * Slot added to buffers to indicate whether its module will
 ;;;             :   report on completion of requests i.e. trackable.
 ;;;             : * Slot added to model struct for tracking requests.
+;;; 2016.04.11 Dan
+;;;             : * Converted the printing module to a class because then
+;;;             :   supporting the :save-trace parameter and show-model-trace 
+;;;             :   command can be done with a class allocated slot to hold
+;;;             :   the event hook ids.  Keep the accessors for the slots the
+;;;             :   same as they were for the struct to avoid having to change
+;;;             :   lots of other code too.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -527,20 +534,22 @@
   owner
   users)
 
-(defstruct printing-module
-  "The internal structure for an instance of the printing module"
-  (v (make-act-r-output :stream t))
-  (c (make-act-r-output :stream t))
-  (suppress-cmds nil)
-  (filter nil)
-  (detail 'high)
-  (model-warnings t)
-  (cbct nil)
-  (one-time-tags nil))
-
 (defstruct act-r-output
   "The internal structure of an output stream for the printing module"
   stream file)
+
+(defclass printing-module ()
+  ((v :accessor printing-module-v :initform (make-act-r-output :stream t))
+   (c :accessor printing-module-c :initform (make-act-r-output :stream t))
+   (suppress-cmds :accessor printing-module-suppress-cmds :initform nil)
+   (filter :accessor printing-module-filter :initform nil)
+   (detail :accessor printing-module-detail :initform 'high)
+   (model-warnings :accessor printing-module-model-warnings :initform t)
+   (cbct :accessor printing-module-cbct :initform nil)
+   (one-time-tags :accessor printing-module-one-time-tags :initform nil)
+   (save-trace :accessor printing-module-save-trace :initform nil)
+   (saved-trace :accessor printing-module-saved-trace :initform nil)
+   (event-hook :accessor printing-module-event-hook :initform (make-hash-table :test 'eq) :allocation :class)))
 
 #|
 This library is free software; you can redistribute it and/or

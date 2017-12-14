@@ -332,6 +332,10 @@
 ;;;             :   refer to the returned spec as a "tag" and indcate that the
 ;;;             :   representation of a tag is unspecified to avoid confusion
 ;;;             :   or abuse and also allow for future changes.
+;;; 2016.03.08 Dan
+;;;             : * Fixed a bug with schedule-overwrite-buffer-chunk because it
+;;;             :   could not generate a "requested" overwrite even though it
+;;;             :   generated an event that made it look that way.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -1030,9 +1034,9 @@
                                       :time-in-ms time-in-ms
                                       :module module
                                       :priority priority 
-                                      :params (if requested
-                                                  (list buffer-name chunk-name)
-                                                (list buffer-name chunk-name :requested requested))
+                                      :params (list buffer-name chunk-name :requested requested)
+                                      :details (when requested
+                                                   (format nil "~s ~s ~s" 'overwrite-buffer-chunk buffer-name chunk-name))
                                       :output output)))))))
 
 

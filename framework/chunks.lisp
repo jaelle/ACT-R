@@ -425,6 +425,22 @@
 ;;;             :   with.  If the second value is non-nil then that means that
 ;;;             :   the chunk was created as a copy and hasn't been itself
 ;;;             :   modified since then.
+;;; 2016.06.27 Dan
+;;;             : * Removed some duplicate testing when using mod-chunk or mod-
+;;;             :   chunk-with-spec since set-chk-slot-value retested the 
+;;;             :   immutability of the chunk and the validity of the slot name.
+;;;             :   Now there's a set-slot-value below set-chk-slot-value which
+;;;             :   can be used if the chunk is immutable and the slot name is
+;;;             :   valid -- calling that otherwise will lead to problems and
+;;;             :   it's not intended for user code.
+;;;             : * Reverse the order of the initial tests in convert-slot-value-
+;;;             :   to-true since get-chunk is costly and unnecessary if the
+;;;             :   renaming is off anyway.
+;;; 2016.06.28 Dan
+;;;             : * Changed set-slot-value to set-c-slot-value.
+;;;             : * Compressed create-slot-value-chunk-if-needed and convert-slot-
+;;;             :   value-to-true into get-true-slot-value-name to save some
+;;;             :   overhead.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -690,28 +706,27 @@
   "Create chunks in the current model"
   `(define-chunks-fct ',chunk-defs))
 
-(defun create-slot-value-chunk-if-needed (value)
-  (when (and value
-             (symbolp value) 
-             (not (keywordp value))
-             (not (chunk-p-fct value))
-             (not (numberp value))
-             (not (eq t value))
-             (alphanumericp (char (symbol-name value) 0)))
-    (create-undefined-chunk value)))
-
-(defun convert-slot-value-to-true (chunk slot-name value)
-  (when (and (chunk-p-fct value) (update-chunks-on-the-fly))
-    (setf value (true-chunk-name-fct value))
-    ;; If it's a chunk save the back link to this chunk
-    (let ((bl (chunk-back-links value)))
-      (if (hash-table-p bl)
-          (push slot-name (gethash (act-r-chunk-name chunk) bl))
-        (let ((ht (make-hash-table)))
-          (setf (gethash (act-r-chunk-name chunk) ht) (list slot-name))
-          (setf (chunk-back-links value) ht)))))
-  value)
-
+(defun get-true-slot-value-name (chunk slot-name value)
+  (let ((chunkp nil))
+    (when (and value
+               (symbolp value)
+               (not (keywordp value))
+               (not (numberp value))
+               (not (eq t value))
+               (alphanumericp (char (symbol-name value) 0)))
+      (unless (chunk-p-fct value)
+        (create-undefined-chunk value))
+      (setf chunkp t))
+    (when (and chunkp (update-chunks-on-the-fly))
+      (setf value (true-chunk-name-fct value))
+      ;; If it's a chunk save the back link to this chunk
+      (let ((bl (chunk-back-links value)))
+        (if (hash-table-p bl)
+            (push slot-name (gethash (act-r-chunk-name chunk) bl))
+          (let ((ht (make-hash-table)))
+            (setf (gethash (act-r-chunk-name chunk) ht) (list slot-name))
+            (setf (chunk-back-links value) ht)))))
+    value))
 
 (defun define-chunks-fct (chunk-def-list)
   "Create chunks in the current model"
@@ -845,12 +860,11 @@
                   (slot-value (cdr slot)))
               (when slot-value
                 
-                (create-slot-value-chunk-if-needed slot-value)
-                                
-                ;; if updates are happening on the fly map the value to
+                ;; Create the slot-value chunk if it is needed
+                ;; and if updates are happening on the fly map the value to
                 ;; the "true" name
                 
-                (setf slot-value (convert-slot-value-to-true chunk slot-name slot-value))
+                (setf slot-value (get-true-slot-value-name chunk slot-name slot-value))
                 
                 (push (cons slot-name slot-value) slots-list)
                 
@@ -905,60 +919,59 @@
 
 (defun set-chk-slot-value (c slot-name value)
   "internal chunk slot setting function"
-  
   (when (act-r-chunk-immutable c)
     (unless (chunk-slot-equal value (chk-slot-value c slot-name))
       (print-warning "Cannot change contents of chunk ~s." (act-r-chunk-name c))
       (return-from set-chk-slot-value nil)))
   (if (valid-slot-name slot-name) ;; any slot name available can be set
-      (progn
-        ;; changing the chunk automatically breaks it as a copy
-        ;; even if the change were to set a slot to the same
-        ;; value it has currently.
-        
-        (setf (act-r-chunk-copied-from c) nil)
-        
-        ;; If the value in the slot now is a chunk then
-        ;; remove this chunk from the back links of that chunk
-        
-        (when (update-chunks-on-the-fly)
-          (let ((old (chk-slot-value c slot-name)))
-            (when (chunk-p-fct old)
-              (let* ((bl (chunk-back-links old))
-                     (new-links (remove slot-name (gethash (act-r-chunk-name c) bl))))
-                (if new-links
-                    (setf (gethash (act-r-chunk-name c) bl) new-links)
-                  (remhash (act-r-chunk-name c) bl))))))
-        
-        ;; If the new value should be a chunk but isn't
-        ;; create one for it
-        
-        (create-slot-value-chunk-if-needed value)
-        
-        ;; if updates are happening on the fly map the value to
-        ;; the "true" name
-        
-        (setf value (convert-slot-value-to-true c slot-name value))
-        
-        ;; Set the new slot value
-        (let ((mask (slot-name->mask slot-name)))
-          
-          (if value
-              (if (logtest mask (act-r-chunk-filled-slots c))
-                  ;; already there so just replace the value
-                  (rplacd (assoc slot-name (act-r-chunk-slot-value-lists c)) value)
-                ;; add the slot to the list and set the filled slot bit
-                (progn
-                  (push (cons slot-name value) (act-r-chunk-slot-value-lists c))
-                  (setf (act-r-chunk-filled-slots c) (logior mask (act-r-chunk-filled-slots c)))))
-            
-            ;; if it's on the list remove it and clear the filled bit
-            (when (logtest mask (act-r-chunk-filled-slots c))
-              (setf (act-r-chunk-slot-value-lists c) (delete (assoc slot-name (act-r-chunk-slot-value-lists c)) (act-r-chunk-slot-value-lists c)))
-              (setf (act-r-chunk-filled-slots c) (logandc1 mask (act-r-chunk-filled-slots c))))))
-        value)
+      (set-c-slot-value c slot-name value)
     (print-warning "~s is not a valid slot name.  You can use extend-possible-slots to add it first if needed." slot-name)))
 
+
+(defun set-c-slot-value (c slot-name value)
+  "Set the chunk's slot value assuming the chunk is not immutable and the slot name is valid"
+  
+  ;; changing the chunk automatically breaks it as a copy
+  ;; even if the change were to set a slot to the same
+  ;; value it has currently.
+  
+  (setf (act-r-chunk-copied-from c) nil)
+  
+  ;; If the value in the slot now is a chunk then
+  ;; remove this chunk from the back links of that chunk
+  
+  (when (update-chunks-on-the-fly)
+    (let ((old (chk-slot-value c slot-name)))
+      (when (chunk-p-fct old)
+        (let* ((bl (chunk-back-links old))
+               (new-links (remove slot-name (gethash (act-r-chunk-name c) bl))))
+          (if new-links
+              (setf (gethash (act-r-chunk-name c) bl) new-links)
+            (remhash (act-r-chunk-name c) bl))))))
+  
+  ;; If the new value should be a chunk but isn't
+  ;; create one for it and if it is get its true name
+  ;; when necessary
+  
+  (setf value (get-true-slot-value-name c slot-name value))
+  
+  ;; Set the new slot value
+  (let ((mask (slot-name->mask slot-name)))
+    
+    (if value
+        (if (logtest mask (act-r-chunk-filled-slots c))
+            ;; already there so just replace the value
+            (rplacd (assoc slot-name (act-r-chunk-slot-value-lists c)) value)
+          ;; add the slot to the list and set the filled slot bit
+          (progn
+            (push (cons slot-name value) (act-r-chunk-slot-value-lists c))
+            (setf (act-r-chunk-filled-slots c) (logior mask (act-r-chunk-filled-slots c)))))
+      
+      ;; if it's on the list remove it and clear the filled bit
+      (when (logtest mask (act-r-chunk-filled-slots c))
+        (setf (act-r-chunk-slot-value-lists c) (delete (assoc slot-name (act-r-chunk-slot-value-lists c)) (act-r-chunk-slot-value-lists c)))
+        (setf (act-r-chunk-filled-slots c) (logandc1 mask (act-r-chunk-filled-slots c))))))
+  value)
 
 (defmacro mod-chunk (chunk-name &rest modifications)
   "Modify the slot values of a chunk"
@@ -985,7 +998,7 @@
                  (print-warning "Cannot modify chunk ~s because it is immutable." chunk-name))
                 (t
                  (dolist (slot-value slots-and-values chunk-name)
-                   (set-chk-slot-value c (car slot-value) (cdr slot-value))))))))))
+                   (set-c-slot-value c (car slot-value) (cdr slot-value))))))))))
     
 
 
@@ -1024,10 +1037,12 @@
   "Modify the slot values without testing except to skip request parameters and variables"
   (let ((c (get-chunk chunk-name)))
     (when c
-      (dolist (x (act-r-chunk-spec-slots mod-spec) chunk-name)
-        (let ((name (act-r-slot-spec-name x)))
-          (unless (or (keywordp name) (chunk-spec-variable-p name)) 
-            (set-chk-slot-value c name (act-r-slot-spec-value x))))))))
+      (if (act-r-chunk-immutable c)
+          (print-warning "Cannot modify chunk ~s because it is immutable." chunk-name)
+        (dolist (x (act-r-chunk-spec-slots mod-spec) chunk-name)
+          (let ((name (act-r-slot-spec-name x)))
+            (unless (or (keywordp name) (chunk-spec-variable-p name)) 
+              (set-c-slot-value c name (act-r-slot-spec-value x)))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : blending.lisp
-;;; Version     : 3.0
+;;; Version     : 3.1
 ;;; 
 ;;; Description : Base module code to handle blended retrieval requests.
 ;;; 
@@ -134,13 +134,52 @@
 ;;; 2015.09.23 Dan [3.0]
 ;;;             : * Making the buffer trackable and completing the requests for
 ;;;             :   use with the new utility learning reward assignment approach.
+;;; 2016.02.03 Dan 
+;;;             : * Change the test for valid values of :tmp since 0 isn't a
+;;;             :   valid option.
+;;;             : * Change the trace to indicate when both :tmp and :ans are nil.
+;;; 2016.02.03 Dan [3.1]
+;;;             : * Change how the probability is computed to hopefully avoid
+;;;             :   more issues with over and under flow when computing e^(Ai/t).
+;;;             :   Now it essentially factors out the highest Ai value so that
+;;;             :   the calculation will be computing e^((Ai-Ak)/t) where Ak is
+;;;             :   the max activation.  That guarantees that there's a 1 value,
+;;;             :   so even if everything else underflows to 0 the sum is one
+;;;             :   and that chunk has a probabilty of 1 (for negative activations),
+;;;             :   and for positive activations it should avoid overflows since
+;;;             :   all the exponent values are <= 0.
+;;; 2016.02.08 Dan
+;;;             : * When the slot contents aren't all chunks or numbers (the 
+;;;             :   :other value in the code and case c in the readme) it now
+;;;             :   uses equalp to reduce the set of potential values to be 
+;;;             :   tested in remove-duplicates whereas before it didn't specify
+;;;             :   a test.
+;;;             : * Changed the trace output to also show the set of slot values
+;;;             :   in the situation above after it has been potentially reduced.
+;;; 2016.02.10 Dan
+;;;             : * Shortcut the computation for chunks and others when when 
+;;;             :   there's only a single potential value.
+;;;             : * Fixed some of the format strings for the trace to replace
+;;;             :   ~f with ~s where results may not be numbers.
+;;; 2016.02.24 Dan
+;;;             : * Minor performance improvement by only iterating over the
+;;;             :   activation list once to compute the sum of probabilities.
+;;; 2016.02.26 Dan
+;;;             : * Fixed a potential bug with reduce on an empty list.
+;;; 2016.03.14 Dan 
+;;;             : * Added the provide so it works with require-extra and note
+;;;             :   that in the docs.
+;;; 2016.05.03 Dan
+;;;             : * Added an optional parameter to print-blending-trace which
+;;;             :   if t means the time is in ms and store the traces based on
+;;;             :   time in ms now.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
-;;; Module to implement the blended retrieval process.  Drop this file into the
-;;; modules directory to add a blending module and buffer called blending to the 
-;;; system.
+;;; Module to implement the blended retrieval process.  Call (require-extra "blending")
+;;; or place this file into the modules directory to add a blending module and 
+;;; buffer called blending to the system.
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
@@ -398,7 +437,7 @@
     
     (when (blending-module-sblt instance)
       (setf sblt (make-sblt-trace))
-      (setf (gethash (mp-time) (blending-module-trace-table instance)) sblt))
+      (setf (gethash (mp-time-ms) (blending-module-trace-table instance)) sblt))
     
     (when (member :ignore-slots (chunk-spec-slots request))
       
@@ -480,17 +519,20 @@
                                           (progn (setf (chunk-blending-suppressed chunk) t)
                                             nil)
                                         (list (list (chunk-activation chunk) 
-                                                    (handler-case (exp (/ (chunk-activation chunk) temperature))
-                                                      (floating-point-underflow () 0)
-                                                      (floating-point-overflow () 
-                                                                               (print-warning "Math overflow during blending.  Chunk activation for ~s is ~s" chunk (chunk-activation chunk)) 
-                                                                               (print-warning "Results of blending are not likely to be meaningful.")
-                                                                               ;; just use something big and assume it's available for now...
-                                                                               (exp 50)))
+                                                    nil
                                                     chunk))))
-                              matching-chunks)))
+                              matching-chunks))
+           (max-ai (when activation-list (reduce 'max activation-list :key 'first))))
       
-      ;(format t "chunk-list: ~S matching-chunks: ~s activation-list: ~s~%" chunk-list matching-chunks activation-list)
+      (dolist (x activation-list)
+        (setf (second x)
+          (handler-case (exp (/ (- (first x) max-ai) temperature))
+            (floating-point-underflow () 0)
+            (floating-point-overflow () ;; shouldn't actually happen...
+                                     (print-warning "Math overflow during blending.  Chunk activation for ~s is ~s with temperature ~s" (third x) (first x) temperature)
+                                     (print-warning "Results of blending are not likely to be meaningful.")
+                                     ;; just use something big and assume it's available for now...
+                                     (exp 50)))))
       
       (when (and (blending-module-blend-all instance) (null (blending-module-mp instance)))
         (print-warning "The :blend-all-slots parameter is set to t, but the :mp parameter is nil which means only perfect matches can occur."))
@@ -543,9 +585,11 @@
       (when (blending-module-trace instance)
         (if (blending-module-tmp instance)
             (model-output "Blending temperature is: ~f" temperature)
-          (model-output "Blending temperature defaults to (* (sqrt 2) :ans): ~f" temperature)))
+          (if (blending-module-ans instance)
+              (model-output "Blending temperature defaults to (* (sqrt 2) :ans): ~f" temperature)
+            (model-output "Blending temperature defaults to 1 when :ans and :tmp are both nil"))))
       
-      (let ((sum (reduce '+ (mapcar 'second activation-list)))
+      (let ((sum (reduce '+ activation-list :key 'second))
             (new-chunk nil)
             (blended-results (mapcar (lambda (x) (cons x nil)) blended-slots))
             (sblt-slot nil))
@@ -644,14 +688,7 @@
                      (when (blending-module-sblt instance)
                        (setf (sblt-slot-condition sblt-slot) which))
                      
-                     (when (blending-module-trace instance)
-                       (case which
-                         (:chunks
-                          (model-output "When all magnitudes are chunks blending based on similarities to all related chunks"))
-                         (:not-generalized
-                          (model-output "When all magnitudes are chunks and the slot is not generalized blending based on similarities to only those chunks"))
-                         (:other
-                          (model-output "When not all magnitudes are numbers or chunks blending based on similarities using those values"))))
+                     
                               
                      (let* ((type (when (eq which :chunks) (common-chunk-type true-mags)))
                             (chunks (if (eq which :chunks)
@@ -662,8 +699,18 @@
                                                         (copy-list (cdr x))
                                                       nil))
                                             (dm-chunks dm)))
-                                      (remove-duplicates true-mags))))
-                     
+                                      (remove-duplicates true-mags :test 'equalp))))
+                       
+                       (when (blending-module-trace instance)
+                       (case which
+                         (:chunks
+                          (model-output "When all magnitudes are chunks blending based on similarities to all related chunks"))
+                         (:not-generalized
+                          (model-output "When all magnitudes are chunks and the slot is not generalized blending based on similarities to only those chunks"))
+                         (:other
+                          (model-output "When not all magnitudes are numbers or chunks blending based on similarities using those unique values: ~s" chunks))))
+                       
+                       
                        (when (blending-module-sblt instance)
                          (setf (sblt-slot-ctype sblt-slot) type)
                          (setf (sblt-slot-chunks sblt-slot) chunks))
@@ -673,9 +720,17 @@
                              (model-output "Intersection of slots for values is: ~s" (slot-mask->names type))
                            (model-output "No intersecting slots found all chunks will be tested")))
                      
+                           
                        (let ((best-val nil)
                              (best-mag nil))
-                       
+                         
+                         (if (= 1 (length chunks))
+                             (progn
+                               (setf best-val (car chunks))
+                               (when (blending-module-trace instance)
+                                 (model-output " Only one possible value ~S" (car chunks))))
+                               
+                         
                          (dolist (val chunks)
                            
                            (when (blending-module-trace instance)
@@ -704,7 +759,7 @@
                              (when (or (null best-mag)
                                        (< sum best-mag))
                                (setf best-mag sum)
-                               (setf best-val val))))
+                               (setf best-val val)))))
                        
                          (cond ((and (blending-module-m->v instance)
                                      (not (equalp slot-vals mags)))
@@ -716,11 +771,11 @@
                                     (setf (sblt-slot-adjusted-val sblt-slot) result))
                                 
                                   (when (blending-module-trace instance)
-                                    (model-output " Final result: ~f  Converted to value: ~s" best-val result))))
+                                    (model-output " Final result: ~s  Converted to value: ~s" best-val result))))
                                (t 
                                 (setf (cdr (assoc slot blended-results)) best-val)
                                 (when (blending-module-trace instance)
-                                  (model-output " Final result: ~f" best-val)))))))))))
+                                  (model-output " Final result: ~s" best-val)))))))))))
         
         ;; put the fixed values into the chunk def.
         
@@ -856,8 +911,8 @@
      :default-value nil :warning "A number or nil" 
      :documentation "Blending minimum base-level activation required to consider a chunk for blending")
    
-   (define-parameter :tmp :valid-test #'(lambda (x) (or (null x) (nonneg x)))
-     :default-value nil :warning "Non-negative number or nil" 
+   (define-parameter :tmp :valid-test #'(lambda (x) (or (null x) (plusp x)))
+     :default-value nil :warning "Positive number or nil" 
      :documentation "Blending temperature")
    (define-parameter :value->mag :valid-test #'(lambda (x) (and x (fctornil x)))
      :default-value 'identity :warning "function" 
@@ -887,7 +942,7 @@
   
   ;; Have to have version and a doc strings
   
-  :version "3.0"
+  :version "3.1"
   :documentation "Module which adds a new buffer to do blended retrievals"
   
   ;; functions to handle the interfacing for the module
@@ -899,10 +954,11 @@
   :request 'blending-request)
 
 
-(defun print-blending-trace (time)
-  (let ((b (get-module blending)))
+(defun print-blending-trace (time &optional (time-in-ms nil))
+  (let ((index (if time-in-ms time (safe-seconds->ms time 'print-blending-trace)))
+        (b (get-module blending)))
     (if b
-        (let ((sblt (gethash time (blending-module-trace-table b))))
+        (let ((sblt (gethash index (blending-module-trace-table b))))
           (if sblt
               (progn   
                 (model-output "Blending request for chunks ~@[with slots ~a~] ~@[without slots ~a~]" 
@@ -964,7 +1020,7 @@
                            (:not-generalized
                             (model-output "When all magnitudes are chunks and the slot is not generalized blending based on similarities to only those chunks"))
                            (:other
-                            (model-output "When not all magnitudes are numbers or chunks blending based on similarities using those values")))
+                            (model-output "When not all magnitudes are numbers or chunks blending based on similarities using those unique values: ~s" (sblt-slot-slot-vals slot))))
                          
                          (when (eq (sblt-slot-condition slot) :chunks)
                            (if (not (zerop (sblt-slot-ctype slot)))
@@ -974,30 +1030,36 @@
                          (let ((best-val nil)
                                (best-mag nil))
                            
-                           (dolist (val (sblt-slot-chunks slot))
-                             
-                             (model-output " Comparing value ~S" val)
-                             
-                             (let ((sum 0.0))
+                           (if (= 1 (length (sblt-slot-chunks slot)))
+                               (progn
+                                 (setf best-val (car (sblt-slot-chunks slot)))
+                                 (model-output " Only one possible value ~S" best-val))
                                
-                               (dolist (possible-list (mapcar 'cdr (remove-if-not (lambda (x) (eq (car x) val)) (sblt-slot-possible-values slot))))
-                                 (let ((possible (first possible-list))
-                                       (sim (second possible-list)))
+                             
+                             (dolist (val (sblt-slot-chunks slot))
+                               
+                               (model-output " Comparing value ~S" val)
+                               
+                               (let ((sum 0.0))
                                  
-                                 (incf sum (* (blending-item-prob possible) (expt sim 2)))
-                                   
-                                   (model-output "  Chunk ~s with probability ~f slot value ~s~@[ converted to magnitude ~s~] similarity: ~f cumulative result: ~f" 
-                                                 (blending-item-name possible) (blending-item-prob possible)
-                                                 (blending-item-value possible) 
-                                                 (if (equalp (blending-item-value possible) (blending-item-mag possible))
-                                                     nil
-                                                   (blending-item-mag possible))
-                                                 sim sum)))
-                               
-                               (when (or (null best-mag)
-                                         (< sum best-mag))
-                                 (setf best-mag sum)
-                                 (setf best-val val))))
+                                 (dolist (possible-list (mapcar 'cdr (remove-if-not (lambda (x) (eq (car x) val)) (sblt-slot-possible-values slot))))
+                                   (let ((possible (first possible-list))
+                                         (sim (second possible-list)))
+                                     
+                                     (incf sum (* (blending-item-prob possible) (expt sim 2)))
+                                     
+                                     (model-output "  Chunk ~s with probability ~f slot value ~s~@[ converted to magnitude ~s~] similarity: ~f cumulative result: ~f" 
+                                                   (blending-item-name possible) (blending-item-prob possible)
+                                                   (blending-item-value possible) 
+                                                   (if (equalp (blending-item-value possible) (blending-item-mag possible))
+                                                       nil
+                                                     (blending-item-mag possible))
+                                                   sim sum)))
+                                 
+                                 (when (or (null best-mag)
+                                           (< sum best-mag))
+                                   (setf best-mag sum)
+                                   (setf best-val val)))))
                            
                            (if (sblt-slot-mag-adjusted slot)
                                (model-output " Final result: ~f  Converted to value: ~s" best-val (sblt-slot-adjusted-val slot))
@@ -1017,6 +1079,8 @@
             
             (model-warning "No blending trace information available for time ~S" time)))
       (print-warning "No blending module available for reporting trace."))))
+
+(provide "blending")
 
 #|
 This library is free software; you can redistribute it and/or

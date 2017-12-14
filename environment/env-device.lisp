@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : env-device.lisp
-;;; Version     : 3.0
+;;; Version     : 3.3
 ;;; 
 ;;; Description : No system dependent code.
 ;;;             : This file contains the code that handles passing
@@ -130,6 +130,31 @@
 ;;;             :   in add-visual-items-to-rpm-window.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2016.04.01 Dan [3.2]
+;;;             : * Treat human clicks in the visible virtuals the same as
+;;;             :   model clicks and let the virtual window deal with the
+;;;             :   processing.  Avoids a lot of crazyness on the Env. side
+;;;             :   and is consistent with respect to the click event handler.
+;;;             :   This also coincides to a shift on the Env. side of not
+;;;             :   using real buttons in the visible virtual window so that
+;;;             :   cursor and visual attention always show over items.  
+;;;             : * That means that all clicks are handled by the subviews and
+;;;             :   button "clicks" all need to be sent over.
+;;; 2016.04.04 Dan [3.3]
+;;;             : * Actually use the show-focus value to determine a color if
+;;;             :   it's a valid symbol or a string.
+;;; 2016.06.08 Dan
+;;;             : * Change add-visual-items-to-rpm-window method so that it
+;;;             :   only sends a message when it recognizes the item type
+;;;             :   instead of sending a null message when it's a new type
+;;;             :   of item to allow for easier customizing/updating.
+;;;             : * Add the methods to handle modifying the items.  For now
+;;;             :   it takes the simple approach of calling the virtual item
+;;;             :   code to make the changes and then removing and redrawing
+;;;             :   the item in the Env. window.
+;;; 2016.08.09 Dan
+;;;             : * Changed the modify methods to just specify allow-other-keys
+;;;             :   since they don't directly use any of them.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -187,11 +212,13 @@
 
 (defmethod vv-click-event-handler ((btn env-button-vdi) where)
   (declare (ignore where))
-  (when (or (functionp (action-function btn))
-            (and (symbolp (action-function btn)) (fboundp (action-function btn))))
-    (funcall (action-function btn) btn))
-  (when (and (model-generated-action) (view-container btn))
-    (send-env-window-update (list 'click (id (view-container btn)) (id btn)))))
+  
+  ;; Always send the click notice over
+  (when (view-container btn)
+    (send-env-window-update (list 'click (id (view-container btn)) (id btn))))
+  
+  ;; let the button-vdi method do the real work ...
+  (call-next-method))
 
 
 (defmethod device-move-cursor-to ((vw visible-virtual-window) (loc vector))
@@ -208,7 +235,17 @@
   (setf (visual-fixation-marker) wind)
   
   (if xyloc
-      (send-env-window-update (list 'attention (id wind) (px xyloc) (py xyloc) (current-model)))
+      (let ((color (show-focus-p (current-device-interface))))
+        (cond ((eq color t)
+               (setf color (color-symbol->env-color 'red)))
+              ((symbolp color)
+               (let ((new-color (color-symbol->env-color color)))
+                 (if (and (string-equal new-color "black") (neq color 'black))
+                     (setf color (color-symbol->env-color 'red))
+                   (setf color new-color))))
+              (t ))  ;; if it's a string assume it's good
+        (send-env-window-update (list 'attention (id wind) (px xyloc) (py xyloc) (current-model) color)))
+    
     (send-env-window-update (list 'clearattention (id wind) (current-model)))))
 
 
@@ -247,15 +284,17 @@
 (defmethod add-visual-items-to-rpm-window ((win visible-virtual-window) &rest items)
   (dolist (item items)
     (add-subviews win item)
-    (send-env-window-update 
-     (case (type-of item)
-       (env-button-vdi
+    (case (type-of item)
+      (env-button-vdi
+       (send-env-window-update 
         (list 'button (id win) (id item) (x-pos item) (y-pos item) 
-          (width item) (height item) (dialog-item-text item) (color-symbol->env-color (color item))))
-       (env-text-vdi
+              (width item) (height item) (dialog-item-text item) (color-symbol->env-color (color item)))))
+      (env-text-vdi
+       (send-env-window-update 
         (list 'text (id win) (id item) (x-pos item) (y-pos item) 
-          (color-symbol->env-color (color item))  (dialog-item-text item) (round (text-height item) 10/12)))
-       (env-line-vdi
+              (color-symbol->env-color (color item))  (dialog-item-text item) (round (text-height item) 10/12))))
+      (env-line-vdi
+       (send-env-window-update 
         (list 'line (id win) (id item) (x-pos item) (y-pos item) 
               (color-symbol->env-color (color item)) (width item) (height item)))))))
 
@@ -305,7 +344,20 @@
       :height height
       :width width
       :color color)))
-  
+
+(defmethod modify-button-for-rpm-window ((button-item env-button-vdi) &key &allow-other-keys)
+  "Modify a button item for the rpm window"
+  (call-next-method)
+  (awhen (view-container button-item) ;; it's on the screen
+         ;; simple approach for the environment -- remove the old one and draw a new one
+         ;; do that directly instead of calling remove/add for simplicity
+         (send-env-window-update (list 'remove (id it) (id button-item)))
+         (send-env-window-update 
+          (list 'button (id it) (id button-item) (x-pos button-item) (y-pos button-item) 
+                (width button-item) (height button-item) (dialog-item-text button-item) (color-symbol->env-color (color button-item)))))
+  button-item)
+
+
   
 (defmethod make-static-text-for-rpm-window ((win visible-virtual-window) 
                                             &key (x 0) (y 0) (text "") 
@@ -324,6 +376,18 @@
       :text-height (round font-size 12/10)
       :str-width-fct (let ((w (round font-size 12/7))) (lambda (str) (* (length str) w))))))
 
+(defmethod modify-text-for-rpm-window ((text-item env-text-vdi) &key &allow-other-keys)
+  "Modify a text item for the rpm window"
+  (call-next-method)
+  (awhen (view-container text-item) ;; it's on the screen
+         ;; simple approach for the environment -- remove the old one and draw a new one
+         ;; do that directly instead of calling remove/add for simplicity
+         (send-env-window-update (list 'remove (id it) (id text-item)))
+         (send-env-window-update 
+          (list 'text (id it) (id text-item) (x-pos text-item) (y-pos text-item) 
+              (color-symbol->env-color (color text-item))  (dialog-item-text text-item) (round (text-height text-item) 10/12))))
+  text-item)
+
 
 (defmethod rpm-window-visible-status ((win visible-virtual-window))
   t)
@@ -337,6 +401,19 @@
       :y-pos (second start-pt)
       :width (first end-pt)
       :height (second end-pt))))
+
+(defmethod modify-line-for-rpm-window ((line env-line-vdi) start-pt end-pt &key &allow-other-keys)
+  (declare (ignorable start-pt end-pt))
+  (call-next-method)
+  (awhen (view-container line) ;; it's on the screen
+         ;; simple approach for the environment -- remove the old one and draw a new one
+         ;; do that directly instead of calling remove/add for simplicity
+         (send-env-window-update (list 'remove (id it) (id line)))
+         (send-env-window-update 
+          (list 'line (id it) (id line) (x-pos line) (y-pos line) 
+              (color-symbol->env-color (color line)) (width line) (height line))))
+  line)
+
 
 ;;; This is a little tricky, because if it's a real window in an IDE'ed
 ;;; Lisp, it's still got to do the right thing to prevent hanging, 
@@ -376,16 +453,22 @@
       (ignore-errors (let ((c (read-from-string (concatenate 'string "#\\" key))))
                        (when (characterp c) c)))))
 
-(defun env-button-pressed (win-name button-name)
-  (let* ((win (map-env-window-name-to-window win-name))
-         (button (when win (find button-name (subviews win) :key 'id :test 'string-equal))))
-    (when button
-      (vv-click-event-handler button nil))))
-
 (defun env-window-click (win-name x y)
   (let ((win (map-env-window-name-to-window win-name)))
     (when win
-      (rpm-window-click-event-handler win (vector x y)))))
+      (let ((current (cursor-pos win)))
+        (unwind-protect 
+            ;; move the cursor to where the person clicked
+            ;; without actually updating the cursor for the
+            ;; model for now
+            ;; Maybe, it should just call device-move-cursor-to
+            ;; so the person is moving the same virtual cursor
+            ;; that the model is, but for now consider them
+            ;; seprate.
+            (progn
+              (setf (cursor-pos win) (vector x y))
+              (device-handle-click win))
+          (setf (cursor-pos win) current))))))
 
 #|
 This library is free software; you can redistribute it and/or

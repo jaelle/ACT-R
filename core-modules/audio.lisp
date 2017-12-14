@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : audio.lisp
-;;; Version     : 4.0
+;;; Version     : 4.2
 ;;; 
 ;;; Description : Source for RPM's Audition Module
 ;;; 
@@ -358,6 +358,45 @@
 ;;;             :   the request for completion.
 ;;; 2015.09.22 Dan
 ;;;             : * Fixed some syntax issues with the previous changes.
+;;; 2016.01.11 Dan
+;;;             : * Changed how print-audicon displays the location, it uses
+;;;             :   a ~s instead of ~a in the format string, so that a string
+;;;             :   value for locations shows up correctly.
+;;; 2016.06.29 Dan [4.1]
+;;;             : * Changing the default value for :overstuff-aural-location back
+;;;             :   to nil for performance reasons.  If a model is speaking or
+;;;             :   subvocalizing and not using the aural information that constant
+;;;             :   re-stuffing of the buffer is costly, and if a model is using the
+;;;             :   aural info, then it probably doesn't need to be overstuffed
+;;;             :   anyway.
+;;; 2016.07.15 Dan
+;;;             : * The unstuff-buffer events didn't specify the module as audio
+;;;             :   but do now.
+;;; 2017.05.22 Dan [4.2]
+;;;             : * Instead of setting the offset and duration for the chunk in
+;;;             :   the aural-location buffer if it's still there when a sound is
+;;;             :   attended to (would require the model keep it around explicitly)
+;;;             :   schedule that event when the chunk enters the aural-location
+;;;             :   buffer because it's possible for the attention shift to occur
+;;;             :   after the sound goes off which results in a warning that the
+;;;             :   time has already passed.  Alternatively, it could check for the
+;;;             :   current time to avoid the warning and continue to only update
+;;;             :   the chunk when it's attended to, but I think it's better to
+;;;             :   update it with the info when available.
+;;; 2017.05.23 Dan
+;;;             : * The previous change breaks the current code for "overstuffing"
+;;;             :   since when the sound ends it modifies the chunk in the buffer
+;;;             :   which then prevents it from being replaced by a new stuffed
+;;;             :   chunk.  The fix is to not require that the chunk is unmodified,
+;;;             :   but that it is still a match to the original event information.
+;;;             : * Do that test with a precondition and change the unstuffing 
+;;;             :   precondition to deal with the possibility of a modification.
+;;;             : * Audio-event-ended is now a maintenance event and only if there's
+;;;             :   a change is a model event created -- this eliminates some 
+;;;             :   spurious conflict-resolution tests when there wasn't really
+;;;             :   a update because of the sound ending.
+;;;             : * Actually use the class's version-string to set the module
+;;;             :   version.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -377,9 +416,10 @@
    (tone-recode-delay :accessor tone-recode-delay :initarg :tone-rec-dly :initform 285)
    (sound-decay-time :accessor decay-time :initarg :decay-time :initform 3000)
    (default-spec :accessor default-spec :initform nil)
-   (last-aural-request :accessor last-aural-request :initform nil))
+   (last-aural-request :accessor last-aural-request :initform nil)
+   (last-stuffed-event :accessor last-stuffed-event :initform nil))
    (:default-initargs
-     :version-string "4.0"
+     :version-string "4.2"
      :name :AUDIO))
 
 
@@ -505,18 +545,39 @@
 
 ;; handle the buffer stuffing
 
+
+(defun aural-location-unstuff-check (module buffer chunk)
+ (let ((current (buffer-read buffer)))
+    (and
+     current
+     
+     (multiple-value-bind (copy was-copy) (chunk-copied-from-fct current)
+       (declare (ignore copy))
+       
+       (or ;; the copy of the chunk is still in the buffer unchanged
+        ;; regardless of whether the original has changed
+        
+        (eq was-copy chunk)
+        
+        ;; otherwise check if it was stuffed
+        ;; and matches the last sound event (both of which may have been modified)
+        (and 
+         (query-buffer buffer '(buffer unrequested))
+         (equal-chunks-fct current (ename (last-stuffed-event module)))))))))
+    
 (defun stuff-sound-buffer (audio-mod) 
   (let ((chunk (buffer-read 'aural-location)))
-    (when (or (null chunk)
+    (when (or
+	      ;(null chunk)
               (and (overstuff-loc audio-mod)
-                   ; This would seem ideal, but the old chunk may have
-                   ; left the audicon already.  So just check that it's
-                   ; unmodified and stuffed because that should be
-                   ; sufficient.
-                   ; (find (chunk-copied-from-fct chunk) (audicon audio-mod) :key 'ename) 
-                   (multiple-value-bind (x unmodified-copy) (chunk-copied-from-fct chunk) (declare (ignore x)) unmodified-copy)
-                   (query-buffer 'aural-location '(buffer unrequested))))
+                   (query-buffer 'aural-location '(buffer unrequested))
+                   ;; overwrite the stuffed chunk if it's 'safe':
+                   ;; - unmodified
+                   ;; - it still matches all the features from the last stuffed chunk
+                   (or (multiple-value-bind (x unmodified-copy) (chunk-copied-from-fct chunk) (declare (ignore x)) unmodified-copy)
+                       (equal-chunks-fct chunk (ename (last-stuffed-event audio-mod))))))
               (find-sound audio-mod (default-spec audio-mod) :stuffed t))))
+
 
 (defmethod new-sound-event :around ((evt sound-event))
   (let ((evt (call-next-method)))
@@ -666,7 +727,6 @@
       (setf event-ls (remove-if-not (lambda (x) 
                                       (eq (finished-p x) (spec-slot-value finished-spec)))
                                     event-ls)))
-    
     (dolist (x slots)
       (when (or (eq (spec-slot-value x) 'lowest)
                 (eq (spec-slot-value x) 'highest))
@@ -702,33 +762,52 @@
       (setf (loc-failure aud-mod) nil)
       
       (if matching-chunks
-          (let ((chunk (random-item matching-chunks)))
+          (let* ((chunk (random-item matching-chunks))
+                 (event (find chunk (audicon aud-mod) :key 'ename)))
+            ;if something is in the aural-location buffer is stuffed
             (if (and stuffed (buffer-read 'aural-location))
+		; overwrite buffer with chunk 0, lowest priority
                 (schedule-overwrite-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested nil :priority 10)
+					; otherwise, add chunk 0 to aural-location buffer,lowest priority
+					;TODO: Add time cost here (replace 100)
+					;TODO: Add a state busy marker at this step
               (schedule-set-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested (not stuffed) :priority 10))
-            
-            (when (and stuffed (unstuff-loc aud-mod))
-              (let ((event (find chunk event-ls :key 'ename)))
-                
-                (awhen (unstuff-event aud-mod)
-                       (delete-event it))
-                
-                (setf (unstuff-event aud-mod) 
-                  (if (numberp (unstuff-loc aud-mod)) 
-                      (schedule-event-relative (unstuff-loc aud-mod) 'unstuff-buffer :maintenance t :params (list 'aural-location chunk) 
-                                               :destination :audio :output nil :time-in-ms t :priority :min
-                                               :precondition 'check-unstuff-buffer)
-                    (schedule-event (+ (offset event) (decay-time aud-mod)) 'unstuff-buffer :maintenance t :params (list 'aural-location chunk) 
-                                    :destination :audio :output nil :time-in-ms t :priority :min
-                                    :precondition 'check-unstuff-buffer))))))
-        (schedule-event-now 'find-sound-failure :params (list stuffed) :module :audio :destination :audio :output 'medium :details "find-sound-failure")))))
 
-  
-(defun audio-event-ended (evt)
+	    ;update last-stuffed-event when buffer is stuffed
+            (when stuffed
+              (setf (last-stuffed-event aud-mod) event))
+
+	    ;unless the audio-event has both an offset and duration
+            (unless (and (chunk-slot-value-fct chunk 'offset) (chunk-slot-value-fct chunk 'duration))
+	      ; schedule event that sound ended
+              (schedule-event (offset event) 'audio-event-ended :module :audio :priority 9 :output 'high :params (list event)
+                              :precondition 'aural-location-update-check :maintenance t :time-in-ms t :details (format nil "~s ~s" 'audio-event-ended chunk)))
+
+            (when (and stuffed (unstuff-loc aud-mod))
+              (awhen (unstuff-event aud-mod)
+                     (delete-event it))
+              
+              (setf (unstuff-event aud-mod) 
+                (if (numberp (unstuff-loc aud-mod)) 
+                    (schedule-event-relative (unstuff-loc aud-mod) 'unstuff-buffer :maintenance t :params (list 'aural-location chunk) 
+                                             :destination :audio :module :audio :output nil :time-in-ms t :priority :min
+                                             :precondition 'aural-location-unstuff-check)
+                  (schedule-event (+ (offset event) (decay-time aud-mod)) 'unstuff-buffer :maintenance t :params (list 'aural-location chunk) 
+                                  :destination :audio :module :audio :output nil :time-in-ms t :priority :min
+                                  :precondition 'aural-location-unstuff-check)))))
+          ; couldn't find sound, schedule a find-sound-failure event
+	  (schedule-event-now 'find-sound-failure :params (list stuffed) :module :audio :destination :audio :output 'medium :details "find-sound-failure")))))
+
+
+(defun aural-location-update-check (evt)
   (let ((buffer-chunk (buffer-read 'aural-location)))
-    (when (and buffer-chunk (eq (chunk-slot-value-fct buffer-chunk 'id) (ename evt)))
-      (set-chunk-slot-value-fct buffer-chunk 'offset (offset evt))
-      (set-chunk-slot-value-fct buffer-chunk 'duration (ms->seconds (- (offset evt) (onset evt)))))))
+    (and buffer-chunk (eq (chunk-slot-value-fct buffer-chunk 'id) (ename evt)))))
+
+(defun audio-event-ended (evt)
+  (update-sound-evt evt)
+  (schedule-mod-buffer-chunk 'aural-location (list 'offset (offset evt)
+                                                   'duration (ms->seconds (- (offset evt) (onset evt))))
+                             0 :module :audio :priority :max))
 
 (defun find-sound-failure (audio stuffed)
   "function to indicate a failure in the trace and set the error flag"
@@ -764,12 +843,11 @@
                  (setf (attended-p s-event) t)
                  (setf (current-marker aud-mod) s-event)
                  
-                 ;; when attending to the event schedule an event to fill in the offset and
-                 ;; duration for when it ends if they aren't already filled
+                 ;; do this when the event chunk enters the aural-location buffer from now on
                  
-                 (unless (and (chunk-slot-value-fct (ename s-event) 'offset) (chunk-slot-value-fct (ename s-event) 'duration))
-                   (schedule-event (offset s-event) 'audio-event-ended :module :audio :priority 9 :output 'high :params (list s-event)
-                                   :time-in-ms t :details (format nil "~s ~s" 'audio-event-ended (ename s-event))))
+                 ;(unless (and (chunk-slot-value-fct (ename s-event) 'offset) (chunk-slot-value-fct (ename s-event) 'duration))
+                 ;  (schedule-event (offset s-event) 'audio-event-ended :module :audio :priority 9 :output 'high :params (list s-event)
+                 ;                  :time-in-ms t :details (format nil "~s ~s" 'audio-event-ended (ename s-event))))
                  
                  (schedule-event-relative (randomize-time-ms (recode s-event))
                                           'audio-encoding-complete
@@ -874,6 +952,7 @@
   (setf (loc-failure instance) nil)
   (setf (attend-failure instance) nil)
   (setf (last-aural-request instance) nil)
+  (setf (last-stuffed-event instance) nil)
   
   (dolist (c '(digit speech tone word highest lowest sound find-sound set-audloc-default internal external self high middle low))
     (unless (chunk-p-fct c)
@@ -1079,10 +1158,10 @@
      :documentation "Whether chunks stuffed into the aural-location buffer should be automatically cleared by the module if unused")
    (define-parameter :overstuff-aural-location
      :valid-test 'tornil
-     :default-value t
+     :default-value nil
      :warning "T or nil"
      :documentation "Whether a chunk previously stuffed into the aural-location buffer can be overwritten by a new chunk to be stuffed"))
-  :version "4.0"
+  :version (version-string (make-instance 'audio-module))
   :documentation "A module which gives the model an auditory attentional system"
   :creation (lambda (x) (declare (ignore x))
               (make-instance 'audio-module))
@@ -1110,7 +1189,7 @@
   (:documentation  "Print out an ASCII representation of the audicon."))
 
 (defmethod print-audio-feature ((feat sound-event))
-  (command-output "~15a~5A~12A~15A~18s~10a~8d   ~8d  ~a"
+  (command-output "~15a~5A~12A~15A~18s~10s~8d   ~8d  ~a"
                   (ename feat)
                   (attended-p feat)
                   (detectable-p feat)

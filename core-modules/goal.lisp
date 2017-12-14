@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : goal.lisp
-;;; Version     : 2.0
+;;; Version     : 2.1
 ;;; 
 ;;; Description : Implementation of the goal module.
 ;;; 
@@ -97,6 +97,10 @@
 ;;;             : * Use :time-in-ms t for all the scheduled events.
 ;;; 2015.07.28 Dan
 ;;;             : * Changed the logical to ACT-R-support in the require-compiled.
+;;; 2016.09.27 Dan [2.1]
+;;;             : * Mod-focus now does the modification in the scheduled event
+;;;             :   instead of directly which makes a goal-focus then mod-focus
+;;;             :   work which seems more natural for some simple situations.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -197,7 +201,7 @@
 
 (define-module-fct 'goal '((goal (:ga 0.0)))
   nil
-  :version "2.0"
+  :version "2.1"
   :documentation "The goal module creates new goals for the goal buffer"
   :creation #'create-goal-module
   :query #'goal-query
@@ -268,16 +272,33 @@
 
 (defun mod-focus-fct (modifications)
   "Modify the chunk in the goal buffer as if by mod-chunk-fct"
-  (let ((chunk (buffer-read 'goal)))
-    (if chunk
-        (progn
-          (schedule-event-now 'goal-modification :module 'goal :priority :max :output 'medium)
-          (mod-chunk-fct chunk modifications))
-                                   
-      (print-warning "No chunk in the goal buffer to modify"))))
+  (let ((g-module (get-module goal)))
+    (when g-module
+      (let ((chunk (buffer-read 'goal)))
+        (if (or chunk (goal-module-delayed g-module))
+            (progn
+              (if (oddp (length modifications))
+                  (print-warning "Odd length modifications list in call to mod-focus.")
+                (let ((slots nil))
+                  (do ((s modifications (cddr s)))
+                      ((null s))
+                    (if (find (car s) slots)
+                        (progn 
+                          (print-warning "Slot ~a used more than once in modifications list." (car s))
+                          (return-from mod-focus-fct))
+                      (push (car s) slots)))
+                  (cond ((not (every 'valid-slot-name slots))
+                         (print-warning "Invalid slot name ~s specified for mod-focus." 
+                                        (find-if (lambda (x) (not (valid-slot-name x))) slots)))
+                        (t
+                         (schedule-event-now 'goal-modification :module 'goal :params (list modifications) 
+                                             :priority :max :output 'medium :details (format nil "~a" 'goal-modification))
+                         (or (goal-module-delayed g-module) chunk))))))
+          
+          (print-warning "No chunk currently in the goal buffer and no pending goal-focus chunk to be modified."))))))
 
-(defun goal-modification ()
-  "Dummy function for mod-focus event")
+(defun goal-modification (modifications)
+  (mod-buffer-chunk 'goal modifications))
 
 #|
 This library is free software; you can redistribute it and/or

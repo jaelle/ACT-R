@@ -9,141 +9,133 @@
 
 global gvar
 
- proc bb_Init {config name title init} {
+proc bb_Init {config name title init key current} {
 
-   if {[winfo exists $name] == 1} {
-      wm deiconify $name
-      focus -force $name
-    } else {
+  set win [toplevel [new_variable_name $name]]
 
+  wm geometry $win [get_configuration $config $win]
 
-      set win [toplevel $name]
- 
+  global gvar
 
-      wm geometry $win [get_configuration $config $win]
+  set gvar($win,Xscreen) 750
+  set gvar($win,Yscreen) 500
 
-      record_new_window $win $title
+  set gvar($win,rho)   5.
+  set gvar($win,theta) 0.0
+  set gvar($win,phi)   0.0
+  set gvar($win,dist)  1200.0
 
-     global gvar
+  set gvar($win,x,translate)   0.0
+  set gvar($win,y,translate)   0.0
 
+  set gvar($win,look_at) [list 0.0 0.0 0.0]
 
-     set gvar($win,Xscreen) 750
-     set gvar($win,Yscreen) 500
+  set pi    [expr {4.0 * atan(1.0)}]
+  set mpi   [expr {-1.0 * $pi}]
 
-     set gvar($win,rho)   5.
-     set gvar($win,theta) 0.0
-     set gvar($win,phi)   0.0
-     set gvar($win,dist)  1200.0
-
-     set gvar($win,x,translate)   0.0
-     set gvar($win,y,translate)   0.0
-
-     set gvar($win,look_at) [list 0.0 0.0 0.0]
-
-     set pi    [expr {4.0 * atan(1.0)}]
-     set mpi   [expr {-1.0 * $pi}]
-
-     set gvar($win,pi)     $pi
-     set gvar($win,mpi)    $mpi
-     set gvar($win,twopi)  [expr {2.0 * $pi}]
+  set gvar($win,pi)     $pi
+  set gvar($win,mpi)    $mpi
+  set gvar($win,twopi)  [expr {2.0 * $pi}]
 
      
-     set gvar($win,theta_light) 0.0
-     set gvar($win,phi_light)   0.0
+  set gvar($win,theta_light) 0.0
+  set gvar($win,phi_light)   0.0
 
-     set gvar($win,colors) [list none none none none none none none none]
+  set gvar($win,colors) [list none none none none none none none none]
 
-     canvas $win.c -width 650 -height 500 -bg black -bd 0
-     place $win.c -x 0 -y 0
+  canvas $win.c -width 650 -height 500 -bg black -bd 0
+  place $win.c -x 0 -y 0
 
-     set gvar($win,canv) $win.c
+  set gvar($win,canv) $win.c
 
-     bind $win.c <ButtonPress-1>   "canvas_rotate_start $win  %W %x %y"
-     bind $win.c <B1-Motion>       "canvas_rotate_drag $win   %W %x %y"
-     bind $win.c <ButtonRelease-1> "canvas_rotate_end $win    %W %x %y"
+  bind $win.c <ButtonPress-1>   "canvas_rotate_start $win  %W %x %y"
+  bind $win.c <B1-Motion>       "canvas_rotate_drag $win   %W %x %y"
+  bind $win.c <ButtonRelease-1> "canvas_rotate_end $win    %W %x %y"
 
-     bind $win.c <ButtonPress-2>   "canvas_pan_start $win  %W %x %y"
-     bind $win.c <B2-Motion>       "canvas_pan_drag $win %W %x %y"
-     bind $win.c <ButtonRelease-2> "canvas_pan_end $win     %W %x %y"
+  bind $win.c <ButtonPress-2>   "canvas_pan_start $win  %W %x %y"
+  bind $win.c <B2-Motion>       "canvas_pan_drag $win %W %x %y"
+  bind $win.c <ButtonRelease-2> "canvas_pan_end $win     %W %x %y"
 
-     bind $win.c <ButtonPress-3>   "canvas_zoom_start $win  %W %x %y"
-     bind $win.c <B3-Motion>       "canvas_zoom_drag $win   %W %x %y"
-     bind $win.c <ButtonRelease-3> "canvas_zoom_end $win    %W %x %y"
+  bind $win.c <ButtonPress-3>   "canvas_zoom_start $win  %W %x %y"
+  bind $win.c <B3-Motion>       "canvas_zoom_drag $win   %W %x %y"
+  bind $win.c <ButtonRelease-3> "canvas_zoom_end $win    %W %x %y"
 
-     eval $init $win
+  $init $win $key $current
 
-   }
+  return $win
 }
 
-proc create_brain_post_view {win} {
+proc create_brain_post_view {win key current} {
     
-    global voxel_shades
+  global voxel_shades
 
-    set voxel_shades ""
+  set voxel_shades ""
 
-     send_environment_cmd \
-      "create list-handler $win.c voxel_shades \
-         (lambda (x) (declare (ignore x)) (bold-brain-3d-data)) () [send_model_name]"
+  if $current {
+    send_environment_cmd "create list-handler $win.c voxel_shades \
+         (lambda (x) (declare (ignore x)) (bold-brain-3d-data (cons t '$win) '$key)) () $key"
+  } else {
+    send_environment_cmd "create list-handler $win.c voxel_shades \
+         (lambda (x) (declare (ignore x)) (bold-brain-3d-data (cons t '$win) '$key)) ()"
+  }
   
-     wait_for_non_null voxel_shades
+  wait_for_non_null voxel_shades
 
-     remove_handler $win.c
+  remove_handler $win.c
 
-     scale $win.s -orient horizontal -command "redraw_brain $win" -from 0 -to [expr [llength $voxel_shades]-1] -label "Scan #" -tickinterval [expr [llength $voxel_shades ]-1] -font menu_font
+  scale $win.s -orient horizontal -command "redraw_brain $win" -from 0 -to [expr [llength $voxel_shades]-1] -label "Scan #" -tickinterval [expr [llength $voxel_shades ]-1] -font menu_font
   
-     $win.s set 0
+  $win.s set 0
 
-     place $win.s -relwidth 1.0 -rely 1.0 -y -75
+  place $win.s -relwidth 1.0 -rely 1.0 -y -75
 }
 
 proc redraw_brain {win time} {
  
-global gvar
-
-
- global voxel_shades 
+  global gvar
+  global voxel_shades 
 
   set gvar($win,colors) [lindex $voxel_shades $time]
 
   bb_redraw $win
 }
 
- proc bb_min { val1 val2 } {
-     if { $val1 <= $val2 } {
-         return $val1
-     } else {
-         return $val2
-     }
- }
+proc bb_min { val1 val2 } {
+  if { $val1 <= $val2 } {
+    return $val1
+  } else {
+    return $val2
+  }
+}
 
- proc bb_max { val1 val2 } {
-     if { $val1 >= $val2 } {
-         return $val1
-     } else {
-         return $val2
-     }
- }
+proc bb_max { val1 val2 } {
+  if { $val1 >= $val2 } {
+    return $val1
+  } else {
+    return $val2
+  }
+}
 
 
- #******************************* MatrixVectorProduct *****************
+#******************************* MatrixVectorProduct *****************
 
- proc MatrixVectorProduct {M V} {
-     set x [lindex $V 0]
-     set y [lindex $V 1]
-     set z [lindex $V 2]
-     set w [lindex $V 3]
-     return [list \
+proc MatrixVectorProduct {M V} {
+  set x [lindex $V 0]
+  set y [lindex $V 1]
+  set z [lindex $V 2]
+  set w [lindex $V 3]
+  return [list \
         [expr {[lindex [lindex $M 0] 0]*$x+[lindex [lindex $M 1] 0]*$y+[lindex [lindex $M 2] 0]*$z+[lindex [lindex $M 3] 0]*$w}] \
         [expr {[lindex [lindex $M 0] 1]*$x+[lindex [lindex $M 1] 1]*$y+[lindex [lindex $M 2] 1]*$z+[lindex [lindex $M 3] 1]*$w}] \
         [expr {[lindex [lindex $M 0] 2]*$x+[lindex [lindex $M 1] 2]*$y+[lindex [lindex $M 2] 2]*$z+[lindex [lindex $M 3] 2]*$w}] \
         [expr {[lindex [lindex $M 0] 3]*$x+[lindex [lindex $M 1] 3]*$y+[lindex [lindex $M 2] 3]*$z+[lindex [lindex $M 3] 3]*$w}] ]
- }
+}
 
- #******************************* bb_d_move ********************************
+#******************************* bb_d_move ********************************
 
- proc bb_d_move {win x y z w } {
+proc bb_d_move {win x y z w } {
  
-global gvar
+  global gvar
 
      set tmp [MatrixVectorProduct $gvar($win,Curnt_Trans) [list $x $y $z $w]]
 
@@ -906,14 +898,14 @@ global gvar
 set voxel_shade_colors [list 23 2d 37 41 4b 55 5f 69 73 7d 87 91 9b a5 af b9 c3 cd d7 e1 eb]
 set voxel_colors [list "#f00" "#090" "#00f" "#aa0" "#0aa" "#a0a" "#0e0" "#36a"]
 
- proc main_bold_brains {config win title init} {
+ proc main_bold_brains {config win title init key current} {
 
      global voxel_colors
      global voxel_shade_colors
 
      global gvar
 
-     bb_Init $config $win $title $init
+     set win [bb_Init $config $win $title $init $key $current]
 
      $gvar($win,canv) create text 10  200 -text "manual" -fill [lindex $voxel_colors 0] -anchor w -font checkbox_font
      $gvar($win,canv) create text 10  240 -text "goal" -fill [lindex $voxel_colors 1] -anchor w -font checkbox_font
@@ -938,22 +930,14 @@ set voxel_colors [list "#f00" "#090" "#00f" "#aa0" "#0aa" "#a0a" "#0e0" "#36a"]
      Set_Viewing_Transform $win $gvar($win,rho) $gvar($win,theta) $gvar($win,phi) $gvar($win,dist)
 
      bb_Draw_Objects $win
+
+     return $win
  }
 
-proc start_post_brain_view {} {
+proc start_post_brain_view {key current} {
 
-  if {[currently_selected_model] == "nil"} {
-
-    tk_messageBox -icon info -type ok -title "3d BOLD viewer" -message "BOLD tools require a current model."
-  } else {
-    main_bold_brains .bold_brain_3d ".bold_brain_3d_[currently_selected_model]" "3d BOLD viewer" create_brain_post_view
-  }
+  return [main_bold_brains .bold_brain_3d ".bold_brain_3d" "3d BOLD viewer" create_brain_post_view $key $current]
 }
 
 
-button [control_panel_name].bold_brains_3d -command {start_post_brain_view} \
-       -text "3D brain" -font button_font
-
-# put that button on the control panel
-
-pack [control_panel_name].bold_brains_3d
+add_history_button start_post_brain_view "BOLD 3D Brain" :save-bold-data "BOLD data" right get-bold-module-data save-bold-data-info

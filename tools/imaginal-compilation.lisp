@@ -13,7 +13,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
 ;;; Filename    : imaginal-compilation.lisp
-;;; Version     : 2.0
+;;; Version     : 3.0
 ;;; 
 ;;; Description : Production compilation IMAGINAL style definition.
 ;;; 
@@ -47,6 +47,23 @@
 ;;;             : * Pass the module to constant-value-p.
 ;;;             : * References to compilation-module-previous are now using a
 ;;;             :   structure instead of list.
+;;; 2016.08.04 Dan [3.0]
+;;;             : * Updated the compilation type definition with one that was
+;;;             :   created automatically by build-compilation-type-file from the
+;;;             :   new spreadsheet that better handles "safe" compilation based
+;;;             :   on whether the buffer is strict harvested or not.  Also added
+;;;             :   some cases which should have been allowed but weren't like 13,40
+;;;             :   where the * in the second can be combined with the + from the
+;;;             :   first and 40,9 which can combine an = with a preceeding * (there
+;;;             :   are some other similar additions but not listing all of them here).
+;;;             :   Those new cases make things more consistent with respect to the
+;;;             :   indicated constraints.
+;;;             : * Added the code necessary to deal with the new cases and the 
+;;;             :   new test functions.
+;;; 2016.11.18 Dan
+;;;             : * When the buffer is strict harvested in p1 (8 or 24) and p2 has
+;;;             :   a query for buffer empty (16 or 20) then drop that buffer
+;;;             :   empty query from the composed production.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -152,7 +169,7 @@
           
           (;; The RHS * to a LHS = case
            (and (find p1-style '(40 56))
-                (find p2-style '(8 24 40 56)))
+                (find p2-style '(8 9 24 25 40 56)))
            
            ;; Map the RHS *'s and LHS ='s not in the RHS with
            ;; the LHS ='s
@@ -247,7 +264,6 @@
 
 
 (defun COMPOSE-IMAGINAL-BUFFER (p1 p1-s p2 p2-s buffer)
-    (declare (ignore p2))
   ;; Generally:
   ;;   If the first has a + (4, 12, 13, 20, 28 29) then
   ;;      the conditions are those of the first including a query
@@ -259,7 +275,8 @@
   ;;      the buffer conditions are the union of those in the first
   ;;      and those of the second with the query from the first being
   ;;      used if there is one (16 24) otherwise the query from the second
-  ;;      is used if there is one
+  ;;      is used if there is one except that if the buffer is strict
+  ;;      harvested a buffer empty query from p2 is dropped in cases 8 and 24
   ;;      the actions are those of the second
   
   ;;   Otherwise (9 40 25 56)
@@ -314,14 +331,37 @@
                      (list a1+))
                     (t 
                      nil)))))
-      ((0 8 16 24)
+      ((0 16)
        (list (append 
               (awhen (buffer-condition-union c1 c2 a1=) 
                      (list it))  
               (if q1 
                   (list q1) 
                 (if q2 
-                    (list q2) 
+                    (list q2)
+                  nil)))
+             (append 
+              (when a2= 
+                (list a2=))
+              (when a2* 
+                (list a2*)) 
+              (when a2+ 
+                (list a2+)))))
+      ((8 24)
+       (list (append 
+              (awhen (buffer-condition-union c1 c2 a1=) 
+                     (list it))  
+              (if q1 
+                  (list q1) 
+                (if q2 
+                    (if (find buffer (no-output (car (sgp :do-not-harvest))))
+                        (list q2)
+                      ;; strict harvested so need to ignore a buffer empty query from p2
+                      (progn
+                        (setf (second q2) (remove '(= buffer empty) (second q2) :test 'equalp))
+                        (if (second q2)
+                            (list q2)
+                          nil)))
                   nil)))
              (append 
               (when a2= 
@@ -331,23 +371,30 @@
               (when a2+ 
                 (list a2+)))))
       ((9 40 25 56)
-       (list (append 
+       (let ((p1-index (cdr (assoc buffer (production-buffer-indices p1))))
+             (p2-index (cdr (assoc buffer (production-buffer-indices p2)))))
+         (list (append 
               (awhen (buffer-condition-union c1 c2 (if a1= a1= a1*)) 
                      (list it))
               (if q1 
                   (list q1) 
-                (if q2 
+                (if (and q2 ;; when it's a * followed by a state free query drop the query
+                         (not (and (= p1-index 40) (or (= p2-index 24) (= p2-index 25) (= p2-index 56)))))
                     (list q2) 
                   nil)))
-             (append (cond ((or a1= a2=) ;; if there's at least one = union those                             
-                            (awhen (buffer=-union a1= a2=) 
-                                   (list it)))
-                           ((or a1* a2*) ;; if there's at least one * union those
-                            (awhen (buffer=-union a1* a2*) 
-                                   (list it)))
-                           (t nil)) ;; can't have a mix of = and * so just ignore otherwise
+             (append (cond ((and a1* a2=)
+                             (awhen (buffer=-union a1* a2=)
+                                    (list it)))
+                            ((or a1= a2=) ;; if there's at least one = union those                             
+                             (awhen (buffer=-union a1= a2=) 
+                                    (list it)))
+                            ((or a1* a2*) ;; if there's at least one * union those
+                             (awhen (buffer=-union a1* a2*) 
+                                    (list it)))
+
+                            (t nil)) ;; can't have other mix of = and * so just ignore 
                      (when a2+ 
-                       (list a2+))))))))
+                       (list a2+)))))))))
 
 
 (defun CHECK-IMAGINAL-CONSISTENCY (buffer module p1 p2)
@@ -451,6 +498,24 @@
     (= (length query1) (length query2) 
        (length (remove-duplicates (append query1 query2) :test 'equal)))))
 
+(defun I-B-C5 (buffer p1 p2)
+  "only if the buffer is not strict harvested"
+  (declare (ignore p1 p2))
+  (find buffer (no-output (car (sgp :do-not-harvest)))))
+
+(defun I-B-C6 (buffer p1 p2)
+  "Not strict harvested and same queries"
+  (and (i-b-c5 buffer p1 p2) (i-b-c2 buffer p1 p2)))
+
+(defun I-B-C7 (buffer p1 p2)
+  "Not strict harvested and no RHS imaginal references"
+  (and (i-b-c5 buffer p1 p2) (no-rhs-imaginal-ref buffer p1 p2)))
+
+(defun I-B-C8 (buffer p1 p2)
+  "Not strict harvested and p2 query must be state free"
+  (and (i-b-c5 buffer p1 p2) (i-b-c3 buffer p1 p2)))
+           
+
 (defun imaginal-reason (p1-index p2-index failed-function)
   (cond ((eql failed-function 'no-rhs-imaginal-ref)
          "the buffer variable cannot be used in the actions of the second production if there is a request in the first production.")
@@ -462,6 +527,15 @@
          "when the first production makes a request and the second harvests it the second can only query for state free.")
         ((eql failed-function 'i-b-c4)
          "when the first production makes a request and the second harvests it the second can only query for state free and the buffer variable cannot be used in the actions of the second.")
+        ((eql failed-function 'i-b-c5)
+         "strict harvesting is enabled for the buffer and either the first production cleared the buffer or the combined production would leave the buffer with a chunk while the original pair would have left it empty.")
+        ((eql failed-function 'i-b-c6)
+         "either strict harvesting is enabled for the buffer and the combined production would leave the buffer with a chunk while the original pair would have left it empty or the queries in the productions are not the same.")
+        ((eql failed-function 'i-b-c7)
+         "either strict harvesting is enabled for the buffer and the combined production would leave the buffer with a chunk while the original pair would have left it empty or the buffer variable cannot be used in the actions of the second production if there is a request in the first production.")
+        ((eql failed-function 'i-b-c8)
+         "either strict harvesting is enabled for the buffer and the combined production would leave the buffer with a chunk while the original pair would have left it empty or the first production makes a request and the second harvests it so it can only query for state free.")
+        
         (t 
          (case p1-index
            ((2 6 10 11 14 15 42 43 46 47 18 22 26 27 30 31 58 59 63 62)
@@ -493,63 +567,69 @@
 
 (define-compilation-type IMAGINAL ((56 56 I-B-C3)
                                    (56 40 T)
-                                   (56 24 I-B-C3)
+                                   (56 25 I-B-C3)
+                                   (56 24 I-B-C8)
                                    (56 16 I-B-C1)
-                                   (56 8 T)
+                                   (56 9 T)
+                                   (56 8 I-B-C5)
                                    (56 0 T)
                                    (40 56 I-B-C3)
                                    (40 40 T)
-                                   (40 24 I-B-C3)
+                                   (40 25 I-B-C3)
+                                   (40 24 I-B-C8)
                                    (40 16 I-B-C1)
-                                   (40 8 T)
+                                   (40 9 T)
+                                   (40 8 I-B-C5)
                                    (40 0 T)
+                                   (29 56 I-B-C4)
+                                   (29 40 NO-RHS-IMAGINAL-REF)
                                    (29 25 I-B-C3)
-                                   (29 24 I-B-C3)
+                                   (29 24 I-B-C8)
                                    (29 16 I-B-C1)
                                    (29 9 NO-RHS-IMAGINAL-REF)
-                                   (29 8 NO-RHS-IMAGINAL-REF)
+                                   (29 8 I-B-C7)
                                    (29 0 T)
                                    (28 56 I-B-C4)
                                    (28 40 NO-RHS-IMAGINAL-REF)
                                    (28 25 I-B-C3)
-                                   (28 24 I-B-C3)
+                                   (28 24 I-B-C8)
                                    (28 16 I-B-C1)
                                    (28 9 NO-RHS-IMAGINAL-REF)
-                                   (28 8 NO-RHS-IMAGINAL-REF)
+                                   (28 8 I-B-C7)
                                    (28 0 T)
                                    (25 29 I-B-C2)
                                    (25 28 I-B-C2)
                                    (25 25 I-B-C2)
-                                   (25 24 I-B-C2)
+                                   (25 24 I-B-C6)
                                    (25 20 I-B-C2)
                                    (25 16 I-B-C2)
                                    (25 13 T)
                                    (25 12 T)
                                    (25 9 T)
-                                   (25 8 T)
+                                   (25 8 I-B-C5)
                                    (25 4 T)
                                    (25 0 T)
-                                   (24 56 I-B-C2)
-                                   (24 40 T)
-                                   (24 29 I-B-C2)
-                                   (24 28 I-B-C2)
-                                   (24 25 I-B-C2)
-                                   (24 24 I-B-C2)
+                                   (24 56 I-B-C6)
+                                   (24 40 I-B-C6)
+                                   (24 29 I-B-C6)
+                                   (24 28 I-B-C6)
+                                   (24 25 I-B-C6)
+                                   (24 24 I-B-C6)
                                    (24 20 I-B-C2)
                                    (24 16 I-B-C2)
-                                   (24 13 T)
-                                   (24 12 T)
-                                   (24 9 T)
-                                   (24 8 T)
+                                   (24 13 I-B-C5)
+                                   (24 12 I-B-C5)
+                                   (24 9 I-B-C5)
+                                   (24 8 I-B-C5)
                                    (24 4 T)
                                    (24 0 T)
                                    (20 56 I-B-C4)
                                    (20 40 NO-RHS-IMAGINAL-REF)
                                    (20 25 I-B-C3)
-                                   (20 24 I-B-C3)
+                                   (20 24 I-B-C8)
                                    (20 16 I-B-C1)
                                    (20 9 NO-RHS-IMAGINAL-REF)
-                                   (20 8 NO-RHS-IMAGINAL-REF)
+                                   (20 8 I-B-C7)
                                    (20 0 T)
                                    (16 56 I-B-C2)
                                    (16 40 T)
@@ -565,53 +645,55 @@
                                    (16 8 T)
                                    (16 4 T)
                                    (16 0 T)
+                                   (13 56 I-B-C4)
+                                   (13 40 NO-RHS-IMAGINAL-REF)
                                    (13 25 I-B-C3)
-                                   (13 24 I-B-C3)
+                                   (13 24 I-B-C8)
                                    (13 16 I-B-C1)
                                    (13 9 NO-RHS-IMAGINAL-REF)
-                                   (13 8 NO-RHS-IMAGINAL-REF)
+                                   (13 8 I-B-C7)
                                    (13 0 T)
                                    (12 56 I-B-C4)
                                    (12 40 NO-RHS-IMAGINAL-REF)
                                    (12 25 I-B-C3)
-                                   (12 24 I-B-C3)
+                                   (12 24 I-B-C8)
                                    (12 16 I-B-C1)
                                    (12 9 NO-RHS-IMAGINAL-REF)
-                                   (12 8 NO-RHS-IMAGINAL-REF)
+                                   (12 8 I-B-C7)
                                    (12 0 T)
                                    (9 29 T)
                                    (9 28 T)
                                    (9 25 T)
-                                   (9 24 T)
+                                   (9 24 I-B-C5)
                                    (9 20 T)
                                    (9 16 T)
                                    (9 13 T)
                                    (9 12 T)
                                    (9 9 T)
-                                   (9 8 T)
+                                   (9 8 I-B-C5)
                                    (9 4 T)
                                    (9 0 T)
-                                   (8 56 T)
-                                   (8 40 T)
-                                   (8 29 T)
-                                   (8 28 T)
-                                   (8 25 T)
-                                   (8 24 T)
+                                   (8 56 I-B-C5)
+                                   (8 40 I-B-C5)
+                                   (8 29 I-B-C5)
+                                   (8 28 I-B-C5)
+                                   (8 25 I-B-C5)
+                                   (8 24 I-B-C5)
                                    (8 20 T)
                                    (8 16 T)
-                                   (8 13 T)
-                                   (8 12 T)
-                                   (8 9 T)
-                                   (8 8 T)
+                                   (8 13 I-B-C5)
+                                   (8 12 I-B-C5)
+                                   (8 9 I-B-C5)
+                                   (8 8 I-B-C5)
                                    (8 4 T)
                                    (8 0 T)
                                    (4 56 I-B-C4)
                                    (4 40 NO-RHS-IMAGINAL-REF)
                                    (4 25 I-B-C3)
-                                   (4 24 I-B-C3)
+                                   (4 24 I-B-C8)
                                    (4 16 I-B-C1)
                                    (4 9 NO-RHS-IMAGINAL-REF)
-                                   (4 8 NO-RHS-IMAGINAL-REF)
+                                   (4 8 I-B-C7)
                                    (4 0 T)
                                    (0 56 T)
                                    (0 40 T)
@@ -625,8 +707,7 @@
                                    (0 12 T)
                                    (0 9 T)
                                    (0 8 T)
-                                   (0 4 T)) 
-  (IMAGINAL) MAP-IMAGINAL-BUFFER COMPOSE-IMAGINAL-BUFFER CHECK-IMAGINAL-CONSISTENCY PRE-INSTANTIATE-IMAGINAL NIL imaginal-reason)
+                                   (0 4 T)) (IMAGINAL) MAP-IMAGINAL-BUFFER COMPOSE-IMAGINAL-BUFFER CHECK-IMAGINAL-CONSISTENCY PRE-INSTANTIATE-IMAGINAL NIL IMAGINAL-REASON)
 
 #|
 This library is free software; you can redistribute it and/or

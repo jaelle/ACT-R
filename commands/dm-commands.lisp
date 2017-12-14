@@ -220,6 +220,14 @@
 ;;; 2015.07.24 Dan
 ;;;             : * Fixed a bug with simulate-retrieval-request-plus-seed-fct since
 ;;;             :   it was trying to return-from simulate-retrieval-request-fct.
+;;; 2016.01.14 Dan
+;;;             : * Fixed a bug with print-dm-finsts because it was trying to
+;;;             :   convert the conses of the finst list to seconds instead of
+;;;             :   the time in the cdr of the conses.
+;;; 2016.09.01 Dan
+;;;             : * Print-activation-trace didn't actually print the name of the
+;;;             :   chunk when the retrieval-set-hook returned a result (the main
+;;;             :   activation trace had the same bug).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -824,7 +832,7 @@
         
         (command-output  "~%~va    Time Stamp~%~v,1,0,'-a" max-name-len "Chunk name" (+ 14 max-name-len) "")
         
-        (dolist (x (dm-finsts dm) (ms->seconds (dm-finsts dm)))
+        (dolist (x (dm-finsts dm) (mapcar (lambda (x) (cons (car x) (ms->seconds (cdr x)))) (dm-finsts dm)))
           (command-output  "~va    ~8/print-time-in-seconds/" max-name-len (car x) (cdr x)))))))
 
 
@@ -860,7 +868,7 @@
                   (:force
                    (when (dm-act-level (dm-sact dm) 'low)
                      (command-output 
-                      "Retrieval-set-hook function forced retrieval of" (sact-trace-result data))))
+                      "Retrieval-set-hook function forced retrieval of chunk ~s" (sact-trace-result data))))
                   
                   (:force-fail
                    (when (dm-act-level (dm-sact dm) 'low)

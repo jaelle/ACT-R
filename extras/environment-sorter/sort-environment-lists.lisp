@@ -27,13 +27,16 @@
 ;;;             : * Added this to the extras for ACT-R 6 for now.
 ;;; 2011.06.03 Dan
 ;;;             : * Fixed this to work with the new multiple model environment.
+;;; 2016.03.14 Dan
+;;;             : * Changed the docs to indicate require-extra as a way to load
+;;;             :   it and note that it's now ACT-R 7.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
 ;;; 
-;;; Move this file into the other-files directory of the ACT-R 6 distribution
-;;; before loading ACT-R 6 if you would like the list boxes in the environment
-;;; to be sorted alphabetically.
+;;; Call (require-extra "environment-sorter" or ove this file into the other-files
+;;; directory of the ACT-R 7 distribution before loading ACT-R 7 if you would like
+;;; the list boxes in the environment to be sorted alphabetically.
 ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;

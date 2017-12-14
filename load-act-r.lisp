@@ -241,6 +241,36 @@
 ;;;             :   on the internals and just ignores any error in the "rebinding"
 ;;;             :   situation.  This works for both the old and new versions and
 ;;;             :   should continue to work with future versions as well.
+;;; 2016.03.03 Dan
+;;;             : * Only push :act-r onto features here and do specific version
+;;;             :   tags in the version-string file.
+;;;             : * Use the *actr-architecture-version* value where appropriate.
+;;; 2016.03.07 Dan
+;;;             : * Added system parameters for version info and version checking,
+;;;             :   and also a function for indicating the version a model was 
+;;;             :   written for to provide warnings when it is loaded in a 
+;;;             :   possibly incompatible version.
+;;; 2016.03.09 Dan
+;;;             : * Added an optional parameter to written-for-act-r-version to
+;;;             :   provide a description for use in the warning.
+;;; 2016.03.14 Dan
+;;;             : * Added the require-extra macro to make it easier to use the
+;;;             :   extras and the requiring-extra function to test in the main
+;;;             :   extra file so it can load more files when needed.
+;;; 2016.03.30 Dan
+;;;             : * Changed written-for-act-r-version to provide more details
+;;;             :   when there is a mismatch and change the system parameter 
+;;;             :   :act-r-minor-version to return 0 instead of nil when there
+;;;             :   isn't currently a minor version.
+;;; 2016.05.31 Dan
+;;;             : * Added the finish-format macro which can be used to do a format
+;;;             :   followed by a finish-output on the stream because *error-output*
+;;;             :   is buffered in some Lisps (Windows CCL 1.10+ at least) and 
+;;;             :   need to make sure warnings/errors get output immediately.
+;;; 2016.06.01 Dan
+;;;             : * Fixed the :check-act-r-version parameter so that it could 
+;;;             :   actually check the versions returned by the :act-r-version
+;;;             :   parameter which includes the -<...> tag at the end.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; General Docs:
@@ -315,7 +345,6 @@
 #-:act-r (if (find :act-r *features*)
              (error "Only one version of ACT-R should be loaded at a time.")
            (progn
-             (pushnew :act-r-7 *features*) 
              (pushnew :act-r *features*)))
 
 
@@ -444,7 +473,13 @@
       (compile-file srcpath :output-file binpath))
     (load binpath)))
   
+;;; Going to use this in a few places to make sure output to *error-output*
+;;; happens since it could be buffered.
 
+(defmacro finish-format (stream string &rest args)
+  `(prog1
+     (format ,stream ,string ,@args)
+     (finish-output ,stream)))
 
 ;;; SMART-LOAD      [Function]
 ;;; Date        : 99.12.21
@@ -466,7 +501,7 @@
     (if (not (probe-file srcpath))
         (if error? 
             (error "File ~S does not exist" srcpath)
-          (format *error-output* "File ~S does not exist" srcpath)))
+          (finish-format *error-output* "File ~S does not exist" srcpath)))
     (compile-and-load srcpath)))
 
 
@@ -474,7 +509,7 @@
   "Loads the file specified after translating the pathname"
   (let ((path (translate-logical-pathname file)))
     (if (not (probe-file path))
-        (format *error-output* "#|Warning: File ~S does not exist.|#~%" path)
+        (finish-format *error-output* "#|Warning: File ~S does not exist.|#~%" path)
       (load path))))
 
 
@@ -526,6 +561,144 @@
 (dolist (the-file *file-list*)
   (smart-load (translate-logical-pathname "ACT-R:framework;") the-file t))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Define system parameters for version information before anything could 
+;;; change the global variables.
+
+
+
+(let ((set-version-info 4))
+  (defun version-info-ignored (val)
+    (declare (ignore val))
+    (if (zerop set-version-info)
+        nil
+      (decf set-version-info))))
+
+(defun fixed-version-parameter-value (val)
+  (lambda (a b)
+    (declare (ignore a b))
+    val))
+
+(create-system-parameter :act-r-version :valid-test 'version-info-ignored
+                         :default-value *actr-version-string* :warning "unmodified"
+                         :documentation "The full software version"
+                         :handler (fixed-version-parameter-value *actr-version-string*))
+
+(create-system-parameter :act-r-architecture-version :valid-test 'version-info-ignored
+                         :default-value (read-from-string *actr-architecture-version*) :warning "unmodified"
+                         :documentation "The ACT-R architecture version"
+                         :handler (fixed-version-parameter-value (read-from-string *actr-architecture-version*)))
+
+(create-system-parameter :act-r-major-version :valid-test 'version-info-ignored
+                         :default-value (read-from-string *actr-major-version-string*) :warning "unmodified"
+                         :documentation "The major software version"
+                         :handler (fixed-version-parameter-value (read-from-string *actr-major-version-string*)))
+
+(create-system-parameter :act-r-minor-version :valid-test 'version-info-ignored
+                         :default-value (if *actr-minor-version-string* (read-from-string *actr-minor-version-string*) 0) :warning "unmodified"
+                         :documentation "The minor software version"
+                         :handler (fixed-version-parameter-value (if *actr-minor-version-string* (read-from-string *actr-minor-version-string*) 0)))
+
+(defun valid-version-test-string (val)
+  (if (eq val t) 
+      t
+    (when (stringp val)
+      (awhen (position #\- val)
+             (setf val (subseq val 0 it)))
+      (and 
+       (every (lambda (x) (find x '(#\. #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9))) val)
+       (<= (count #\. val) 2)
+       (> (length val) 0)))))
+
+(let ((last-result t))
+  (defun check-act-r-version-string (set-or-get val)
+    (if set-or-get
+        (setf last-result (if (stringp val)
+                              (let* ((ver (subseq val 0 (position #\- val)))
+                                     (version-numbers (read-from-string (format nil "(~a)" (substitute #\space #\. ver)))))
+                                (case (length version-numbers)
+                                  (1 (= (first version-numbers) (car (ssp :act-r-architecture-version))))
+                                  (2 (and (= (first version-numbers) (car (ssp :act-r-architecture-version)))
+                                          (= (second version-numbers) (car (ssp :act-r-major-version)))))
+                                  (3 (and (= (first version-numbers) (car (ssp :act-r-architecture-version)))
+                                          (= (second version-numbers) (car (ssp :act-r-major-version)))
+                                          (<= (third version-numbers) (car (ssp :act-r-minor-version)))))
+                                  (t nil))) ;; just to be safe, but the valid test should avoid this...
+                            val))
+      last-result)))
+       
+
+(create-system-parameter :check-act-r-version :valid-test 'valid-version-test-string
+                         :default-value t :warning "a valid version string of the form A{.B{.C}} where A, B, and C are integers followed by optional data after a dash"
+                         :documentation "Test a version string against the current version for t or nil result"
+                         :handler 'check-act-r-version-string)
+
+
+
+(defun written-for-act-r-version (version &optional description)
+  (if (stringp version)
+      (let ((strip-tag (subseq version 0 (position #\- version))))
+        (if (valid-version-test-string strip-tag)
+            (let ((given-version-numbers (read-from-string (format nil "(~a)" (substitute #\space #\. strip-tag))))
+                  (current-version-numbers (mapcar (lambda (x) (car (ssp-fct (list x))))
+                                             (list :act-r-architecture-version
+                                                   :act-r-major-version
+                                                   :act-r-minor-version))))
+              (cond ((not (= (first given-version-numbers) (first current-version-numbers)))
+                     (print-warning "Current ACT-R architecture ~d is not the same as ~d specified in ~a~@[ for ~a~]." 
+                                    (first current-version-numbers) (first given-version-numbers) version description))
+                    ((and (second given-version-numbers)
+                          (not (= (second given-version-numbers) (second current-version-numbers))))
+                     (if (> (second given-version-numbers) (second current-version-numbers))
+                         (print-warning "Current ACT-R major version ~d is older than major version ~d specified in ~a~@[ for ~a~].~%           Some features may not be implemented." 
+                                        (second current-version-numbers) (second given-version-numbers) version description)
+                       (print-warning "Current ACT-R major version ~d is newer than major version ~d specified in ~a~@[ for ~a~].~%           It may not be backward compatible." 
+                                      (second current-version-numbers) (second given-version-numbers) version description)))
+                    ((and (third given-version-numbers)
+                          (> (third given-version-numbers) (third current-version-numbers)))
+                     (print-warning "Current ACT-R minor version ~d is older than minor version ~d specified in ~a~@[ for ~a~].~%           Some features may not be implemented." 
+                                    (third current-version-numbers) (third given-version-numbers) version description))
+                    (t t)))
+          (progn
+            (print-warning "Invalid version specified in written-for-act-r-version: ~s.  Version must be an ACT-R version string." version)
+            :invalid-value)))
+    (progn
+      (print-warning "Invalid version specified in written-for-act-r-version: ~s.  Version must be an ACT-R version string." version)
+      :invalid-value)))
+
+  
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Define a macro to make loading extras easier
+
+(defvar *requiring-extra* nil)
+
+(defun requiring-extra ()
+  *requiring-extra*)
+
+
+(defmacro require-extra (name)
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (unless (member ,name *modules* :test #'string=)
+       (cond ((> (mps-count *meta-processes*) 1)
+              (print-warning "Cannot require an extra when more than one meta-process is defined."))
+             ((mp-models)
+              (print-warning "Cannot require an extra when there is a current model."))
+             ((not (probe-file (translate-logical-pathname (format nil "ACT-R:extras;~a;" ,name))))
+              (print-warning "Directory ~a for specified extra ~a not found." 
+                             (translate-logical-pathname (format nil "ACT-R:extras;~a;" ,name))
+                             ,name))
+             ((not (probe-file (translate-logical-pathname (format nil "ACT-R:extras;~a;~a.lisp" ,name ,name))))
+              (print-warning "Load file for extra ~a at location ~a not found." ,name
+                             (translate-logical-pathname (format nil "ACT-R:extras;~a;~a.lisp" ,name ,name))))
+             (t
+              (unwind-protect 
+               (progn
+                 (setf *requiring-extra* t)
+                 (compile-and-load (translate-logical-pathname (format nil "ACT-R:extras;~a;~a.lisp" ,name ,name))))
+                (setf *requiring-extra* nil))
+              (if (member ,name *modules* :test #'string=)
+                  t
+                (print-warning "Extra ~a was loaded, but did not have a provide to prevent it from being loaded again." ,name)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Load the core modules 
@@ -600,7 +773,7 @@
 
 (format t "~%##################################~%")
 (mp-print-versions)
-(format t "~%######### Loading of ACT-R 7 is complete #########~%")
+(format t "~%######### Loading of ACT-R ~d is complete #########~%" *actr-architecture-version*)
 
 
 (let ((d (directory (translate-logical-pathname "ACT-R:user-loads;*.lisp"))))

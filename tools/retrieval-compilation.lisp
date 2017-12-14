@@ -35,6 +35,10 @@
 ;;;             : * Start of conversion to typeless chunks.
 ;;;             : * References to compilation-module-previous are now using a
 ;;;             :   structure instead of list.
+;;; 2016.11.18 Dan
+;;;             : * When the buffer is strict harvested in p1 (8 or 24) and p2 has
+;;;             :   a query for buffer empty (16 or 20) then drop that buffer
+;;;             :   empty query from the composed production.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 #+:packaged-actr (in-package :act-r)
@@ -127,7 +131,8 @@
   ;;   If the first production tests the buffer but doesn't make
   ;;      any queries or requests (8)
   ;;      any = condition in the first is used along with any 
-  ;;      query from the second
+  ;;      query from the second except that if the buffer is strict
+  ;;      harvested a buffer empty query from p2 is dropped 
   ;;   If the first has no = condition but does have queries 
   ;;      and is without a request (16)
   ;;      the = condition from the second is used along with
@@ -169,8 +174,17 @@
        (list (append 
               (when c1 
                 (list c1)) 
-              (when q2 
-                (list q2)))
+              
+              (if q2 
+                    (if (find buffer (no-output (car (sgp :do-not-harvest))))
+                        (list q2)
+                      ;; strict harvested so need to ignore a buffer empty query from p2
+                      (progn
+                        (setf (second q2) (remove '(= buffer empty) (second q2) :test 'equalp))
+                        (if (second q2)
+                            (list q2)
+                          nil)))
+                  nil))
              (when a2+ 
                (list a2+))))
       (16
@@ -181,6 +195,7 @@
                 (list q1)))
              (when a2+ 
                (list a2+))))
+      
       ((20 24 28)
        (if (find (aif (cdr (assoc buffer (production-buffer-indices p2))) it 0) '(0 2 4 6 16 18 20 22))
            (list (append (when c1 (list c1)) (when q1 (list q1)))

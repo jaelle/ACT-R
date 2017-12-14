@@ -460,7 +460,7 @@ proc show_why_not_dm {chunks model} {
 # Make a button for the control panel that will open a new declarative viewer
 
 button [control_panel_name].declarative -command {make_declarative_viewer} \
-       -text "Declarative viewer" -font button_font
+       -text "Declarative" -font button_font
 
 # put that button on the control panel
 
