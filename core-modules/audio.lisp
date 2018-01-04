@@ -717,6 +717,7 @@
          (relative-slots nil)
          (event-ls (detectable-audicon aud-mod)))
     
+    
     ;; filter by attended - spec-slot-op must be =
     (when attended-spec
       (setf event-ls (remove-if-not (lambda (x) 
@@ -727,6 +728,7 @@
       (setf event-ls (remove-if-not (lambda (x) 
                                       (eq (finished-p x) (spec-slot-value finished-spec)))
                                     event-ls)))
+    
     (dolist (x slots)
       (when (or (eq (spec-slot-value x) 'lowest)
                 (eq (spec-slot-value x) 'highest))
@@ -764,25 +766,18 @@
       (if matching-chunks
           (let* ((chunk (random-item matching-chunks))
                  (event (find chunk (audicon aud-mod) :key 'ename)))
-            ;if something is in the aural-location buffer is stuffed
+            
             (if (and stuffed (buffer-read 'aural-location))
-		; overwrite buffer with chunk 0, lowest priority
                 (schedule-overwrite-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested nil :priority 10)
-					; otherwise, add chunk 0 to aural-location buffer,lowest priority
-					;TODO: Add time cost here (replace 100)
-					;TODO: Add a state busy marker at this step
-              (schedule-set-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested (not stuffed) :priority 10))
-
-	    ;update last-stuffed-event when buffer is stuffed
+              (cmsaa-matching-location chunk stuffed))
+            
             (when stuffed
               (setf (last-stuffed-event aud-mod) event))
-
-	    ;unless the audio-event has both an offset and duration
+            
             (unless (and (chunk-slot-value-fct chunk 'offset) (chunk-slot-value-fct chunk 'duration))
-	      ; schedule event that sound ended
               (schedule-event (offset event) 'audio-event-ended :module :audio :priority 9 :output 'high :params (list event)
                               :precondition 'aural-location-update-check :maintenance t :time-in-ms t :details (format nil "~s ~s" 'audio-event-ended chunk)))
-
+            
             (when (and stuffed (unstuff-loc aud-mod))
               (awhen (unstuff-event aud-mod)
                      (delete-event it))
@@ -795,9 +790,7 @@
                   (schedule-event (+ (offset event) (decay-time aud-mod)) 'unstuff-buffer :maintenance t :params (list 'aural-location chunk) 
                                   :destination :audio :module :audio :output nil :time-in-ms t :priority :min
                                   :precondition 'aural-location-unstuff-check)))))
-          ; couldn't find sound, schedule a find-sound-failure event
-	  (schedule-event-now 'find-sound-failure :params (list stuffed) :module :audio :destination :audio :output 'medium :details "find-sound-failure")))))
-
+        (schedule-event-now 'find-sound-failure :params (list stuffed) :module :audio :destination :audio :output 'medium :details "find-sound-failure")))))
 
 (defun aural-location-update-check (evt)
   (let ((buffer-chunk (buffer-read 'aural-location)))
@@ -815,6 +808,80 @@
   (set-buffer-failure 'aural-location :ignore-if-full t :requested (not stuffed))
   nil)
 
+;;; CMSAA-MATCHING-LOCATION
+(defun cmsaa-matching-location (chunk stuffed)
+  ;(format t "~A~%" chunk)
+  (let* ((imaginal-location (nth 2 (first (chunk-spec-slot-spec (chunk-name-to-chunk-spec (first (buffer-chunk imaginal)))))))
+	 (priority (priority-map (event-location chunk) imaginal-location))
+	 (seconds (bias-to-seconds priority)))
+	  ;(format t "goal, saliency: ~A,~A~%" goal saliency)
+      (format t "bias: ~A seconds: ~A~%" priority seconds)
+    (schedule-set-buffer-chunk 'aural-location chunk seconds :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
+
+(defun event-location (chunk)
+  (let* ((slots (chunk-spec-slot-spec (chunk-name-to-chunk-spec chunk))))
+    (dolist (slot slots)
+      (cond ((equalp (nth 1 slot) 'location)
+	     ;(format t "event location: ~A~%" (nth 2 slot))
+	     (return (nth 2 slot)))))))
+
+(defun cmsaa-set-gm-sd (attended-location)
+  (case attended-location
+    (-90 40.3)
+    (0   31.6)
+    (90  4.96)))
+
+(defun cmsaa-set-sm-sd (attended-location)
+  (case attended-location
+    (-90 40.3)
+    (0   32.7)
+    (90  13.87)))
+
+(defun cmsaa-set-gm-mag (attended-location)
+  (case attended-location
+    (-90 0.7463)
+    (0   0.7576)
+    (90  0.7639)))
+
+(defun cmsaa-set-sm-mag (attended-location)
+  (case attended-location
+    (-90 0.7341)
+    (0   0.7424)
+    (90  0.7412)))
+
+;;; GOAL-MAP
+(defun goal-map(x attended-location)
+	(let* ((sd (cmsaa-set-gm-sd attended-location))
+		(mag (cmsaa-set-gm-mag attended-location)))
+  		;(format t "sound location: ~A attended location: ~A~%" x attended-location)
+  		;(format t "Goal Map (mag, attended-lcation,sd,): (~A, ~A, ~A)~%" mag attended-location sd)
+  			(* mag ( / (expt (- (abs (- (coerce attended-location 'short-float) (coerce x 'short-float)))) 2) (* 2 (expt sd 2))))))
+
+;;; SALIENCY-MAP
+(defun saliency-map(x attended-location)
+	(let* ((sd (cmsaa-set-sm-sd attended-location))
+		(mag (cmsaa-set-sm-mag attended-location)))
+  			(- mag (* mag ( / (expt (- (abs (- (coerce attended-location 'short-float) (coerce x 'short-float)))) 2) (* 2 (expt sd 2)))))))
+
+;;; PRIORITY-MAP
+(defun priority-map(x attended-location)
+	(let* ((goal (goal-map x attended-location))
+		(saliency (saliency-map x attended-location))
+		(bias (+ goal saliency)))
+
+		bias))
+
+		;(cond ((> bias 1) 
+		;	1.0)
+		;	((< bias 0)
+		;	0.0)
+		;(t bias))))
+
+;;; BIAS-TO-SECONDS
+(defun bias-to-seconds (bias)
+					;(format t "~A~%" bias)
+  ;TODO: 0.410 value comes from motor module time + recode time. Need to make this dynamic.
+  (- (/ (- 2000.0 (* bias 2000.0)) 1000.0) 0.410))
 
 ;;; ATTEND-SOUND      [Method]
 ;;; Date        : 97.08.18
