@@ -1,3 +1,6 @@
+
+
+
 ;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -816,7 +819,7 @@
 	 (seconds (bias-to-seconds priority)))
 	  ;(format t "goal, saliency: ~A,~A~%" goal saliency)
       (format t "bias: ~A seconds: ~A~%" priority seconds)
-    (schedule-set-buffer-chunk 'aural-location chunk seconds :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
+    (schedule-set-buffer-chunk 'aural-location chunk (randomize-time seconds) :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
 
 (defun event-location (chunk)
   (let* ((slots (chunk-spec-slot-spec (chunk-name-to-chunk-spec chunk))))
@@ -827,41 +830,42 @@
 
 (defun cmsaa-set-gm-sd (attended-location)
   (case attended-location
-    (-90 40.3)
-    (0   31.6)
-    (90  4.96)))
+    (-90 48.4961)
+    (0   6.9700)
+    (90  8.9600)))
 
 (defun cmsaa-set-sm-sd (attended-location)
   (case attended-location
-    (-90 40.3)
-    (0   32.7)
-    (90  13.87)))
+    (-90 50.9886)
+    (0   15.8907)
+    (90  12.9400)))
 
 (defun cmsaa-set-gm-mag (attended-location)
   (case attended-location
-    (-90 0.7463)
-    (0   0.7576)
-    (90  0.7639)))
+    (-90 0.7662)
+    (0   0.7603)
+    (90  0.7511)))
 
 (defun cmsaa-set-sm-mag (attended-location)
   (case attended-location
-    (-90 0.7341)
-    (0   0.7424)
-    (90  0.7412)))
+    (-90 0.7605)
+    (0   0.7463)
+    (90  0.7325)))
 
 ;;; GOAL-MAP
 (defun goal-map(x attended-location)
 	(let* ((sd (cmsaa-set-gm-sd attended-location))
 		(mag (cmsaa-set-gm-mag attended-location)))
   		;(format t "sound location: ~A attended location: ~A~%" x attended-location)
-  		;(format t "Goal Map (mag, attended-lcation,sd,): (~A, ~A, ~A)~%" mag attended-location sd)
-  			(* mag ( / (expt (- (abs (- (coerce attended-location 'short-float) (coerce x 'short-float)))) 2) (* 2 (expt sd 2))))))
+  		(format t "Goal Map (mag, attended-lcation,sd): (~A, ~A, ~A)~%" mag attended-location sd)
+  			(* mag (exp ( / (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2))))))
 
 ;;; SALIENCY-MAP
 (defun saliency-map(x attended-location)
 	(let* ((sd (cmsaa-set-sm-sd attended-location))
-		(mag (cmsaa-set-sm-mag attended-location)))
-  			(- mag (* mag ( / (expt (- (abs (- (coerce attended-location 'short-float) (coerce x 'short-float)))) 2) (* 2 (expt sd 2)))))))
+	       (mag (cmsaa-set-sm-mag attended-location)))
+	  (format t "Saliency Map (mag, attended location, sd): (~A, ~A, ~A)~%" mag attended-location sd)
+  			(- mag (* mag (exp (/ (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2)))))))
 
 ;;; PRIORITY-MAP
 (defun priority-map(x attended-location)
