@@ -405,6 +405,11 @@
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
+(require "asdf")
+(require "cl-randist")
+
+(defvar *tau* 1)
+(defvar *sigma* 1)
 
 (require-compiled "GENERAL-PM" "ACT-R-support:general-pm")
 
@@ -811,6 +816,12 @@
   (set-buffer-failure 'aural-location :ignore-if-full t :requested (not stuffed))
   nil)
 
+;;; RANDOMIZE-TIME-EXGAUSSIAN
+(defun randomize-time-exgaussian (seconds)
+  "function to generate a random time in seconds from an exgaussian distribution"
+  (require "cl-randist")
+  (+ (random-distributions:random-normal seconds *sigma*) (random-distributions:random-exponential (coerce (/ 1.0 *tau*) 'double-float))))
+
 ;;; CMSAA-MATCHING-LOCATION
 (defun cmsaa-matching-location (chunk stuffed)
   ;(format t "~A~%" chunk)
@@ -819,7 +830,7 @@
 	 (seconds (bias-to-seconds priority)))
 	  ;(format t "goal, saliency: ~A,~A~%" goal saliency)
       (format t "bias: ~A seconds: ~A~%" priority seconds)
-    (schedule-set-buffer-chunk 'aural-location chunk (randomize-time seconds) :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
+    (schedule-set-buffer-chunk 'aural-location chunk (randomize-time-exgaussian seconds) :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
 
 (defun event-location (chunk)
   (let* ((slots (chunk-spec-slot-spec (chunk-name-to-chunk-spec chunk))))
@@ -1131,6 +1142,10 @@
 (defun params-audio-module (aud-mod param)
   (if (consp param)
     (case (first param)
+      (:sigma
+       (setf *sigma* (rest param)))
+      (:tau
+       (setf *tau* (rest param)))
       (:digit-detect-delay
        (setf (digit-detect-delay aud-mod) (safe-seconds->ms (rest param) 'sgp))
        (rest param))
@@ -1191,7 +1206,17 @@
             :queries '(modality preparation execution processor) 
             :status-fn (lambda () (print-module-status (get-module :audio)))
             :trackable t))
-  (list 
+  (list
+   (define-parameter :sigma
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative number"
+       :documentation "Standard deviation of the reaction time distribution")
+   (define-parameter :tau
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative value"
+       :documentation "Exponential rate of reaction time distribution")
    (define-parameter :digit-detect-delay
      :valid-test 'nonneg
      :default-value 0.3
@@ -1309,5 +1334,5 @@ Lesser General Public License for more details.
 
 You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+Foundation, Inc., 59 Temple Place, Suite 330, Bosto,n MA  02111-1307  USA
 |#
