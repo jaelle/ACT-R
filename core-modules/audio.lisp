@@ -405,11 +405,14 @@
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
+; Run in command line first: (ql:quickload "cl-randist")
 (require "asdf")
 (require "cl-randist")
 
-(defvar *tau* 1)
-(defvar *sigma* 1)
+(defvar *tau-standard* nil)
+(defvar *sigma-standard* nil)
+(defvar *tau-deviant* nil)
+(defvar *sigma-deviant* nil)
 
 (require-compiled "GENERAL-PM" "ACT-R-support:general-pm")
 
@@ -816,21 +819,48 @@
   (set-buffer-failure 'aural-location :ignore-if-full t :requested (not stuffed))
   nil)
 
+(defun randomize-time-exgaussian (attended location mu)
+  (if (eq attended location)
+      (randomize-time-exgaussian-standard mu)
+      (randomize-time-exgaussian-deviant mu)))
+
 ;;; RANDOMIZE-TIME-EXGAUSSIAN
-(defun randomize-time-exgaussian (seconds)
+(defun randomize-time-exgaussian-standard (mu)
   "function to generate a random time in seconds from an exgaussian distribution"
   (require "cl-randist")
-  (+ (random-distributions:random-normal seconds *sigma*) (random-distributions:random-exponential (coerce (/ 1.0 *tau*) 'double-float))))
+  ;convert ms to sec
+  (let* ((sigma (/ *sigma-standard* 1000))
+	(tau (/ *tau-standard* 1000))
+	(seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce (/ 1.0 tau) 'double-float)))))
+    (print sigma)
+    (print tau)
+    (print mu)
+    (print seconds)
+    seconds))
+
+(defun randomize-time-exgaussian-deviant (mu)
+  "function to generate a random time in seconds from an exgaussian distribution"
+  (require "cl-randist")
+  (let* ((sigma (/ *sigma-deviant* 1000))
+	(tau (/ *tau-deviant* 1000))
+	(seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce (/ 1.0 tau) 'double-float)))))
+   (print sigma)
+   (print tau)
+   (print mu)
+   (print seconds)
+   seconds))
 
 ;;; CMSAA-MATCHING-LOCATION
 (defun cmsaa-matching-location (chunk stuffed)
   ;(format t "~A~%" chunk)
   (let* ((imaginal-location (nth 2 (first (chunk-spec-slot-spec (chunk-name-to-chunk-spec (first (buffer-chunk imaginal)))))))
 	 (priority (priority-map (event-location chunk) imaginal-location))
-	 (seconds (bias-to-seconds priority)))
+	 (seconds (bias-to-seconds priority))
+	 (seconds-with-noise (randomize-time-exgaussian (event-location chunk) imaginal-location seconds))
+	 (final-seconds (- seconds-with-noise 0.410)))
 	  ;(format t "goal, saliency: ~A,~A~%" goal saliency)
-      (format t "bias: ~A seconds: ~A~%" priority seconds)
-    (schedule-set-buffer-chunk 'aural-location chunk (randomize-time-exgaussian seconds) :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
+      (format t "~%bias: ~A seconds: ~A with noise: ~A final: ~A~%" priority seconds seconds-with-noise final-seconds)
+    (schedule-set-buffer-chunk 'aural-location chunk final-seconds :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
 
 (defun event-location (chunk)
   (let* ((slots (chunk-spec-slot-spec (chunk-name-to-chunk-spec chunk))))
@@ -896,7 +926,7 @@
 (defun bias-to-seconds (bias)
 					;(format t "~A~%" bias)
   ;TODO: 0.410 value comes from motor module time + recode time. Need to make this dynamic.
-  (- (/ (- 2000.0 (* bias 2000.0)) 1000.0) 0.410))
+  (/ (- 2000.0 (* bias 2000.0)) 1000.0))
 
 ;;; ATTEND-SOUND      [Method]
 ;;; Date        : 97.08.18
@@ -1142,10 +1172,18 @@
 (defun params-audio-module (aud-mod param)
   (if (consp param)
     (case (first param)
-      (:sigma
-       (setf *sigma* (rest param)))
-      (:tau
-       (setf *tau* (rest param)))
+      (:sigma-standard
+       (setf *sigma-standard* (rest param))
+       (print *sigma-standard*))
+      (:tau-standard
+       (setf *tau-standard* (rest param))
+       (print *tau-standard*))
+      (:sigma-deviant
+       (setf *sigma-deviant* (rest param))
+       (print *sigma-deviant*))
+      (:tau-deviant
+       (setf *tau-deviant* (rest param))
+       (print *tau-deviant*))
       (:digit-detect-delay
        (setf (digit-detect-delay aud-mod) (safe-seconds->ms (rest param) 'sgp))
        (rest param))
@@ -1207,16 +1245,26 @@
             :status-fn (lambda () (print-module-status (get-module :audio)))
             :trackable t))
   (list
-   (define-parameter :sigma
+   (define-parameter :sigma-standard
        :valid-test 'nonneg
        :default-value 1
        :warning "a non-negative number"
-       :documentation "Standard deviation of the reaction time distribution")
-   (define-parameter :tau
+       :documentation "Standard deviation of the reaction time distribution of standard location")
+   (define-parameter :tau-standard
        :valid-test 'nonneg
        :default-value 1
        :warning "a non-negative value"
-       :documentation "Exponential rate of reaction time distribution")
+       :documentation "Exponential rate of reaction time distribution of standard location")
+   (define-parameter :sigma-deviant
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative number"
+       :documentation "Standard deviation of the reaction time distribution of deviant location")
+   (define-parameter :tau-deviant
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative value"
+       :documentation "Exponential rate of reaction time distribution of deviant location")
    (define-parameter :digit-detect-delay
      :valid-test 'nonneg
      :default-value 0.3
