@@ -1,3 +1,6 @@
+
+
+
 ;;;  -*- mode: LISP; Syntax: COMMON-LISP;  Base: 10 -*-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; 
@@ -402,6 +405,14 @@
 #+:packaged-actr (in-package :act-r)
 #+(and :clean-actr (not :packaged-actr) :ALLEGRO-IDE) (in-package :cg-user)
 #-(or (not :clean-actr) :packaged-actr :ALLEGRO-IDE) (in-package :cl-user)
+; Run in command line first: (ql:quickload "cl-randist")
+(require "asdf")
+(require "cl-randist")
+
+(defvar *tau-standard* nil)
+(defvar *sigma-standard* nil)
+(defvar *tau-deviant* nil)
+(defvar *sigma-deviant* nil)
 
 (require-compiled "GENERAL-PM" "ACT-R-support:general-pm")
 
@@ -567,7 +578,8 @@
     
 (defun stuff-sound-buffer (audio-mod) 
   (let ((chunk (buffer-read 'aural-location)))
-    (when (or (null chunk)
+    (when (or
+	      ;(null chunk)
               (and (overstuff-loc audio-mod)
                    (query-buffer 'aural-location '(buffer unrequested))
                    ;; overwrite the stuffed chunk if it's 'safe':
@@ -716,6 +728,7 @@
          (relative-slots nil)
          (event-ls (detectable-audicon aud-mod)))
     
+    
     ;; filter by attended - spec-slot-op must be =
     (when attended-spec
       (setf event-ls (remove-if-not (lambda (x) 
@@ -767,7 +780,7 @@
             
             (if (and stuffed (buffer-read 'aural-location))
                 (schedule-overwrite-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested nil :priority 10)
-              (schedule-set-buffer-chunk 'aural-location chunk 0 :time-in-ms t :module :audio :requested (not stuffed) :priority 10))
+              (cmsaa-matching-location chunk stuffed))
             
             (when stuffed
               (setf (last-stuffed-event aud-mod) event))
@@ -790,7 +803,6 @@
                                   :precondition 'aural-location-unstuff-check)))))
         (schedule-event-now 'find-sound-failure :params (list stuffed) :module :audio :destination :audio :output 'medium :details "find-sound-failure")))))
 
-
 (defun aural-location-update-check (evt)
   (let ((buffer-chunk (buffer-read 'aural-location)))
     (and buffer-chunk (eq (chunk-slot-value-fct buffer-chunk 'id) (ename evt)))))
@@ -807,6 +819,116 @@
   (set-buffer-failure 'aural-location :ignore-if-full t :requested (not stuffed))
   nil)
 
+(defun randomize-time-exgaussian (attended location mean)
+  (if (eq attended location)
+      (randomize-time-exgaussian-standard mean)
+      (randomize-time-exgaussian-deviant mean)))
+
+;;; RANDOMIZE-TIME-EXGAUSSIAN
+(defun randomize-time-exgaussian-standard (mean)
+  "function to generate a random time in seconds from an exgaussian distribution"
+  (require "cl-randist")
+  ;convert ms to sec
+  (let* ((sigma (/ *sigma-standard* 1000))
+	 (tau (/ *tau-standard* 1000))
+	 (mu (- mean tau))
+	 (seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
+    (print sigma)
+    (print tau)
+    (print mu)
+    (print seconds)
+    seconds))
+
+(defun randomize-time-exgaussian-deviant (mean)
+  "function to generate a random time in seconds from an exgaussian distribution"
+  (require "cl-randist")
+  (let* ((sigma (/ *sigma-deviant* 1000))
+	 (tau (/ *tau-deviant* 1000))
+	 (mu (- mean tau))
+	 (seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
+   (print sigma)
+   (print tau)
+   (print mu)
+   (print seconds)
+   seconds))
+
+;;; CMSAA-MATCHING-LOCATION
+(defun cmsaa-matching-location (chunk stuffed)
+  ;(format t "~A~%" chunk)
+  (let* ((imaginal-location (nth 2 (first (chunk-spec-slot-spec (chunk-name-to-chunk-spec (first (buffer-chunk imaginal)))))))
+	 (priority (priority-map (event-location chunk) imaginal-location))
+	 (seconds (bias-to-seconds priority))
+	 (seconds-with-noise (randomize-time-exgaussian (event-location chunk) imaginal-location seconds))
+	 (final-seconds (max 0 (- seconds-with-noise 0.410))))
+	  ;(format t "goal, saliency: ~A,~A~%" goal saliency)
+      (format t "~%bias: ~A seconds: ~A with noise: ~A final: ~A~%" priority seconds seconds-with-noise final-seconds)
+    (schedule-set-buffer-chunk 'aural-location chunk final-seconds :time-in-ms nil :module :audio :requested (not stuffed) :priority 10)))
+
+(defun event-location (chunk)
+  (let* ((slots (chunk-spec-slot-spec (chunk-name-to-chunk-spec chunk))))
+    (dolist (slot slots)
+      (cond ((equalp (nth 1 slot) 'location)
+	     ;(format t "event location: ~A~%" (nth 2 slot))
+	     (return (nth 2 slot)))))))
+
+(defun cmsaa-set-gm-sd (attended-location)
+  (case attended-location
+    (-90 48.4961)
+    (0   6.9700)
+    (90  8.9600)))
+
+(defun cmsaa-set-sm-sd (attended-location)
+  (case attended-location
+    (-90 50.9886)
+    (0   15.8907)
+    (90  12.9400)))
+
+(defun cmsaa-set-gm-mag (attended-location)
+  (case attended-location
+    (-90 0.7662)
+    (0   0.7603)
+    (90  0.7511)))
+
+(defun cmsaa-set-sm-mag (attended-location)
+  (case attended-location
+    (-90 0.7605)
+    (0   0.7463)
+    (90  0.7325)))
+
+;;; GOAL-MAP
+(defun goal-map(x attended-location)
+	(let* ((sd (cmsaa-set-gm-sd attended-location))
+		(mag (cmsaa-set-gm-mag attended-location)))
+  		;(format t "sound location: ~A attended location: ~A~%" x attended-location)
+  		(format t "Goal Map (mag, attended-lcation,sd): (~A, ~A, ~A)~%" mag attended-location sd)
+  			(* mag (exp ( / (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2))))))
+
+;;; SALIENCY-MAP
+(defun saliency-map(x attended-location)
+	(let* ((sd (cmsaa-set-sm-sd attended-location))
+	       (mag (cmsaa-set-sm-mag attended-location)))
+	  (format t "Saliency Map (mag, attended location, sd): (~A, ~A, ~A)~%" mag attended-location sd)
+  			(- mag (* mag (exp (/ (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2)))))))
+
+;;; PRIORITY-MAP
+(defun priority-map(x attended-location)
+	(let* ((goal (goal-map x attended-location))
+		(saliency (saliency-map x attended-location))
+		(bias (+ goal saliency)))
+
+		bias))
+
+		;(cond ((> bias 1) 
+		;	1.0)
+		;	((< bias 0)
+		;	0.0)
+		;(t bias))))
+
+;;; BIAS-TO-SECONDS
+(defun bias-to-seconds (bias)
+					;(format t "~A~%" bias)
+  ;TODO: 0.410 value comes from motor module time + recode time. Need to make this dynamic.
+  (/ (- 2000.0 (* bias 2000.0)) 1000.0))
 
 ;;; ATTEND-SOUND      [Method]
 ;;; Date        : 97.08.18
@@ -1052,6 +1174,18 @@
 (defun params-audio-module (aud-mod param)
   (if (consp param)
     (case (first param)
+      (:sigma-standard
+       (setf *sigma-standard* (rest param))
+       (print *sigma-standard*))
+      (:tau-standard
+       (setf *tau-standard* (rest param))
+       (print *tau-standard*))
+      (:sigma-deviant
+       (setf *sigma-deviant* (rest param))
+       (print *sigma-deviant*))
+      (:tau-deviant
+       (setf *tau-deviant* (rest param))
+       (print *tau-deviant*))
       (:digit-detect-delay
        (setf (digit-detect-delay aud-mod) (safe-seconds->ms (rest param) 'sgp))
        (rest param))
@@ -1112,7 +1246,27 @@
             :queries '(modality preparation execution processor) 
             :status-fn (lambda () (print-module-status (get-module :audio)))
             :trackable t))
-  (list 
+  (list
+   (define-parameter :sigma-standard
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative number"
+       :documentation "Standard deviation of the reaction time distribution of standard location")
+   (define-parameter :tau-standard
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative value"
+       :documentation "Exponential rate of reaction time distribution of standard location")
+   (define-parameter :sigma-deviant
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative number"
+       :documentation "Standard deviation of the reaction time distribution of deviant location")
+   (define-parameter :tau-deviant
+       :valid-test 'nonneg
+       :default-value 1
+       :warning "a non-negative value"
+       :documentation "Exponential rate of reaction time distribution of deviant location")
    (define-parameter :digit-detect-delay
      :valid-test 'nonneg
      :default-value 0.3
@@ -1230,5 +1384,5 @@ Lesser General Public License for more details.
 
 You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+Foundation, Inc., 59 Temple Place, Suite 330, Bosto,n MA  02111-1307  USA
 |#
