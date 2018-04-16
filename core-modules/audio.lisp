@@ -827,30 +827,34 @@
 ;;; RANDOMIZE-TIME-EXGAUSSIAN
 (defun randomize-time-exgaussian-standard (mean)
   "function to generate a random time in seconds from an exgaussian distribution"
-  (require "cl-randist")
-  ;convert ms to sec
-  (let* ((sigma (/ *sigma-standard* 1000))
-	 (tau (/ *tau-standard* 1000))
-	 (mu (- mean tau))
-	 (seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
-    (print sigma)
-    (print tau)
-    (print mu)
-    (print seconds)
-    seconds))
+  (cond ((not (equal *sigma-deviant* nil))
+	 (require "cl-randist")
+					;convert ms to sec
+	 (let* ((sigma (/ *sigma-standard* 1000))
+		(tau (/ *tau-standard* 1000))
+		(mu (- mean tau))
+		(seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
+	   (print sigma)
+	   (print tau)
+	   (print mu)
+	   (print seconds)
+	   seconds))
+	(t mean)))
 
 (defun randomize-time-exgaussian-deviant (mean)
   "function to generate a random time in seconds from an exgaussian distribution"
   (require "cl-randist")
-  (let* ((sigma (/ *sigma-deviant* 1000))
-	 (tau (/ *tau-deviant* 1000))
-	 (mu (- mean tau))
-	 (seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
-   (print sigma)
-   (print tau)
-   (print mu)
-   (print seconds)
-   seconds))
+  (cond ((not (equal *sigma-deviant* nil))
+	 (let* ((sigma (/ *sigma-deviant* 1000))
+		(tau (/ *tau-deviant* 1000))
+		(mu (- mean tau))
+		(seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
+	   (print sigma)
+	   (print tau)
+	   (print mu)
+	   (print seconds)
+	   seconds))
+	(t mean)))
 
 ;;; CMSAA-MATCHING-LOCATION
 (defun cmsaa-matching-location (chunk stuffed)
@@ -898,7 +902,11 @@
 ;;; GOAL-MAP
 (defun goal-map(x attended-location)
 	(let* ((sd (cmsaa-set-gm-sd attended-location))
-		(mag (cmsaa-set-gm-mag attended-location)))
+	       (mag (cmsaa-set-gm-mag attended-location)))
+	  
+	  ; To account for the fact our goal map vector is indexed from -90 ... 89.
+	  (if (not (eq x -90))
+	      (setf x (- x 1)))
   		;(format t "sound location: ~A attended location: ~A~%" x attended-location)
   		(format t "Goal Map (mag, attended-lcation,sd): (~A, ~A, ~A)~%" mag attended-location sd)
   			(* mag (exp ( / (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2))))))
@@ -907,6 +915,11 @@
 (defun saliency-map(x attended-location)
 	(let* ((sd (cmsaa-set-sm-sd attended-location))
 	       (mag (cmsaa-set-sm-mag attended-location)))
+	  
+          ; To account for the fact our goal map vector is indexed from -90 ... 89.
+	  (if (not (eq x -90))
+	      (setf x (- x 1)))
+	  
 	  (format t "Saliency Map (mag, attended location, sd): (~A, ~A, ~A)~%" mag attended-location sd)
   			(- mag (* mag (exp (/ (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2)))))))
 
@@ -925,8 +938,7 @@
 		;(t bias))))
 
 ;;; BIAS-TO-SECONDS
-(defun bias-to-seconds (bias)
-					;(format t "~A~%" bias)
+(defun bias-to-seconds (bias)				;(format t "~A~%" bias)
   ;TODO: 0.410 value comes from motor module time + recode time. Need to make this dynamic.
   (/ (- 2000.0 (* bias 2000.0)) 1000.0))
 
@@ -1248,24 +1260,24 @@
             :trackable t))
   (list
    (define-parameter :sigma-standard
-       :valid-test 'nonneg
-       :default-value 1
-       :warning "a non-negative number"
+       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :default-value nil
+       :warning "a non-negative number or nil"
        :documentation "Standard deviation of the reaction time distribution of standard location")
    (define-parameter :tau-standard
-       :valid-test 'nonneg
-       :default-value 1
-       :warning "a non-negative value"
+       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :default-value nil
+       :warning "a non-negative number or nil"
        :documentation "Exponential rate of reaction time distribution of standard location")
    (define-parameter :sigma-deviant
-       :valid-test 'nonneg
-       :default-value 1
-       :warning "a non-negative number"
+       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :default-value nil
+       :warning "a non-negative number or nil"
        :documentation "Standard deviation of the reaction time distribution of deviant location")
    (define-parameter :tau-deviant
-       :valid-test 'nonneg
-       :default-value 1
-       :warning "a non-negative value"
+       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :default-value nil
+       :warning "a non-negative number or nil"
        :documentation "Exponential rate of reaction time distribution of deviant location")
    (define-parameter :digit-detect-delay
      :valid-test 'nonneg
