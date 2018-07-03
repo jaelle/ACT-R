@@ -811,7 +811,7 @@
   (update-sound-evt evt)
   (schedule-mod-buffer-chunk 'aural-location (list 'offset (offset evt)
                                                    'duration (ms->seconds (- (offset evt) (onset evt))))
-                             0 :module :audio :priority :max))
+                            0 :module :audio :priority :max))
 
 (defun find-sound-failure (audio stuffed)
   "function to indicate a failure in the trace and set the error flag"
@@ -832,7 +832,7 @@
 					;convert ms to sec
 	 (let* ((sigma (/ *sigma-standard* 1000))
 		(tau (/ *tau-standard* 1000))
-		(mu (- mean tau))
+		(mu mean)
 		(seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
 	   (print sigma)
 	   (print tau)
@@ -847,7 +847,7 @@
   (cond ((not (equal *sigma-deviant* nil))
 	 (let* ((sigma (/ *sigma-deviant* 1000))
 		(tau (/ *tau-deviant* 1000))
-		(mu (- mean tau))
+		(mu mean)
 		(seconds (+ (random-distributions:random-normal mu sigma) (random-distributions:random-exponential (coerce tau 'double-float)))))
 	   (print sigma)
 	   (print tau)
@@ -909,7 +909,7 @@
 	      (setf x (- x 1)))
   		;(format t "sound location: ~A attended location: ~A~%" x attended-location)
   		(format t "Goal Map (mag, attended-lcation,sd): (~A, ~A, ~A)~%" mag attended-location sd)
-  			(* mag (exp ( / (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2))))))
+  			(* mag (exp ( / (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (* (expt sd 2) 2))))))
 
 ;;; SALIENCY-MAP
 (defun saliency-map(x attended-location)
@@ -921,7 +921,7 @@
 	      (setf x (- x 1)))
 	  
 	  (format t "Saliency Map (mag, attended location, sd): (~A, ~A, ~A)~%" mag attended-location sd)
-  			(- mag (* mag (exp (/ (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (expt (* 2 sd) 2)))))))
+  			(- mag (* mag (exp (/ (- (expt (abs (- (coerce attended-location 'short-float) (coerce x 'short-float))) 2)) (* (expt sd 2) 2)))))))
 
 ;;; PRIORITY-MAP
 (defun priority-map(x attended-location)
@@ -1260,22 +1260,22 @@
             :trackable t))
   (list
    (define-parameter :sigma-standard
-       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :valid-test 'nonneg
        :default-value nil
        :warning "a non-negative number or nil"
        :documentation "Standard deviation of the reaction time distribution of standard location")
    (define-parameter :tau-standard
-       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :valid-test 'nonneg
        :default-value nil
        :warning "a non-negative number or nil"
        :documentation "Exponential rate of reaction time distribution of standard location")
    (define-parameter :sigma-deviant
-       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :valid-test 'nonneg
        :default-value nil
        :warning "a non-negative number or nil"
        :documentation "Standard deviation of the reaction time distribution of deviant location")
    (define-parameter :tau-deviant
-       :valid-test (lambda (x) (or (equal x nil) (and numberp x) (>= x 0)))
+       :valid-test 'nonneg
        :default-value nil
        :warning "a non-negative number or nil"
        :documentation "Exponential rate of reaction time distribution of deviant location")
